@@ -50,7 +50,7 @@ docker-compose.yml     local development
 ### With Docker (recommended)
 
 ```bash
-cd visionguard
+cd AGS
 docker compose up --build
 ```
 
@@ -111,8 +111,8 @@ sudo apt update && sudo apt install -y docker.io docker-compose-v2
 sudo usermod -aG docker $USER && newgrp docker
 
 # Get the code onto the VM (git clone, or from your machine:)
-#   scp -r visionguard ubuntu@<PUBLIC_IP>:~
-cd visionguard/backend
+#   scp -r AGS ubuntu@<PUBLIC_IP>:~
+cd AGS/backend
 docker build -t visionguard .
 docker run -d --name visionguard --restart unless-stopped \
   -p 8000:8000 \
