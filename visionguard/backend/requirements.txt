@@ -1,0 +1,11 @@
+# All packages below ship aarch64 (ARM64) Linux wheels — no paddle, CPU-only.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+numpy<2.0
+opencv-python-headless>=4.9
+ultralytics>=8.2          # pulls CPU torch/torchvision on ARM automatically
+easyocr>=1.7
+deepface>=0.0.90
+tensorflow>=2.16          # aarch64 wheels available on PyPI
+tf-keras>=2.16            # keras 2 compat layer required by deepface

@@ -1,0 +1,11 @@
+ultralytics
+opencv-python
+paddleocr 
+opencv-python
+paddlepaddle
+easyocr
+torch
+torchvision
+torchaudio
+onnxruntime
+deepface
