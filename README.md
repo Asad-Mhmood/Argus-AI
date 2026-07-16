@@ -1,136 +1,304 @@
 # VisionGuard AI
 
-AI video surveillance platform with four pluggable analytics modules, a FastAPI
-inference engine, and a Next.js dashboard.
+**AI video surveillance platform** — four computer-vision analytics modules behind one
+dashboard, built to run on **CPU only** (no GPU required) and deploy for **free**
+(Oracle Cloud Always Free + Vercel).
 
-| Module | What it does |
-|---|---|
-| **Face Recognition / Attendance** | Recognizes enrolled faces, keeps an attendance log with in/out times |
-| **PPE / Safety Compliance** | Detects safety-gear violations, tracks compliance rate |
-| **Idle Worker / Activity** | Pose-based tracking, flags workers idle beyond a threshold |
-| **License Plate Recognition** | Reads vehicle plates, logs each unique plate with time |
+| Module | What it does | Model |
+|---|---|---|
+| 🧑 **Face Recognition / Attendance** | Recognizes enrolled faces, keeps an attendance log with in/out times | YOLOv12-face + ArcFace (DeepFace) |
+| 🦺 **PPE / Safety Compliance** | Detects safety-gear violations (no helmet, no gloves, …), tracks a live compliance rate | YOLO11 (custom HSE) |
+| 🏃 **Idle Worker / Activity** | Tracks people via pose keypoints, flags anyone idle beyond a threshold | YOLOv8-pose |
+| 🚗 **License Plate Recognition (ANPR)** | Detects and reads vehicle plates, logs each unique plate with time | YOLO (custom) + EasyOCR |
 
-Every module accepts three video sources: **live IP camera (RTSP)**, **uploaded
-recording**, or a **bundled demo video**. Analysis runs at a configurable low FPS
-with frame-dropping, so everything works on CPU — no GPU required.
+Every module accepts **three video sources**, chosen per analysis session:
+
+1. **Live IP camera** — any RTSP/HTTP stream URL
+2. **Uploaded recording** — MP4 / AVI / MOV / MKV / WebM
+3. **Bundled demo video** — for instant demos
+
+---
+
+## Table of contents
+
+1. [Architecture](#1-architecture)
+2. [Repository layout](#2-repository-layout)
+3. [Running locally](#3-running-locally)
+4. [Configuration reference](#4-configuration-reference)
+5. [Using the system](#5-using-the-system)
+6. [API reference](#6-api-reference)
+7. [Deployment — backend on Oracle Cloud (free)](#7-deployment--backend-on-oracle-cloud-free)
+8. [Deployment — frontend on Vercel (free)](#8-deployment--frontend-on-vercel-free)
+9. [Updating a deployed system](#9-updating-a-deployed-system)
+10. [Adding a new detection module](#10-adding-a-new-detection-module)
+11. [Troubleshooting](#11-troubleshooting)
+
+---
+
+## 1. Architecture
 
 ```
-┌──────────────────────┐   REST + MJPEG   ┌─────────────────────────────┐
-│ Next.js dashboard    │ ───────────────▶ │ FastAPI engine (CPU)        │
-│ (Vercel / anywhere)  │                  │ YOLO · DeepFace · EasyOCR   │
-└──────────────────────┘                  │ SQLite events · sessions    │
-                                          └─────────────────────────────┘
+┌───────────────────────┐        REST (JSON)        ┌──────────────────────────────┐
+│  Next.js dashboard    │ ────────────────────────▶ │  FastAPI inference engine    │
+│  (Vercel / any host)  │ ◀──────────────────────── │  (Docker, CPU-only)          │
+│                       │     MJPEG video stream    │                              │
+│  - use-case wizard    │                           │  - SessionManager (threads)  │
+│  - live annotated view│                           │  - 4 pluggable modules       │
+│  - stats panels       │                           │  - VideoSource (RTSP/file)   │
+│  - history + charts   │                           │  - SQLite event store        │
+└───────────────────────┘                           └──────────────────────────────┘
 ```
 
-## Repository layout
+**Why two parts?** The AI models need Python, PyTorch and OpenCV — they cannot run on a
+static-site host. So the *engine* runs anywhere Python/Docker runs (a cloud VM, an on-site
+PC), and the *dashboard* is a lightweight web app that can be hosted anywhere and pointed
+at any engine via one environment variable (`NEXT_PUBLIC_API_URL`).
+
+**How an analysis session works** (the core flow, `backend/app/core/session_manager.py`):
+
+1. The dashboard calls `POST /api/sessions` with `{use_case, source_type, source}`.
+2. The engine opens the video source and loads the module's model, then starts a
+   background thread.
+3. The thread loop: grab frame → downscale → run the module → draw annotations →
+   publish JPEG (for the MJPEG stream) → write events to SQLite → sleep to hold
+   `ANALYSIS_FPS`.
+4. The dashboard shows `GET /api/sessions/{id}/stream` (live annotated MJPEG) and polls
+   `GET /api/sessions/{id}/stats` + `GET /api/events`.
+
+**CPU-friendliness — the key design decisions:**
+
+- Analysis runs at a **low, configurable FPS** (default 2/s) — enough for attendance,
+  compliance, idle detection and gate ANPR, and light enough for any modern CPU.
+- **Live streams never lag**: a dedicated grab thread keeps only the *newest* frame and
+  throws the rest away, so slow inference can never fall behind a 25 FPS camera.
+- **Recorded files are frame-skipped** to the same analysis rate.
+- Frames are **downscaled** to `MAX_FRAME_WIDTH` (default 960 px) before inference.
+
+## 2. Repository layout
 
 ```
 backend/
   app/
-    main.py            FastAPI app
-    api.py             REST routes
-    config.py          all settings (env-overridable)
-    database.py        SQLite event store
+    main.py               FastAPI app + lifespan (DB init, session shutdown)
+    api.py                all REST routes
+    config.py             every setting, env-overridable — the single source of config
+    database.py           thread-safe SQLite store (sessions + events tables)
     core/
-      video_source.py  RTSP (frame-dropping) / file / demo sources
-      session_manager.py  threaded inference sessions + MJPEG
-    modules/           one pluggable module per use case
-  models/              *.pt weights
-  demo_videos/         bundled demos
-  faces_db/            one folder per enrolled person
-  Dockerfile           ARM64 + x86_64 compatible
-frontend/              Next.js dashboard
-docker-compose.yml     local development
+      video_source.py     RTSPSource (frame-dropping) / FileSource (frame-skipping)
+      session_manager.py  AnalysisSession threads, MJPEG generator, concurrency cap
+    modules/
+      __init__.py         module registry (use-case key → class + title)
+      base.py             BaseModule interface + shared drawing helpers
+      face_attendance.py  ppe.py  activity.py  anpr.py
+  models/                 *.pt model weights (baked into the Docker image)
+  demo_videos/            bundled demo clips
+  faces_db/               one folder per enrolled person (photos)
+  data/                   runtime state: SQLite DB, uploads, embeddings cache (gitignored)
+  Dockerfile              multi-arch (x86_64 + ARM64/aarch64)
+  requirements.txt        all deps ship aarch64 wheels — no paddle
+frontend/
+  app/                    Next.js App Router pages (wizard / session / history)
+  components/             Nav, stats panels, custom SVG chart
+  lib/api.js              API client + use-case colors/labels
+docker-compose.yml        local full-stack development
+legacy/                   original prototype scripts (reference only)
 ```
 
----
+## 3. Running locally
 
-## 1 · Run locally
+### Option A — Docker (recommended, runs everything incl. face recognition)
 
-### With Docker (recommended)
+Prerequisite: Docker Desktop (Windows/macOS) or Docker Engine (Linux).
 
 ```bash
-cd AGS
 docker compose up --build
 ```
 
-- Dashboard: http://localhost:3000
-- API docs: http://localhost:8000/docs
+- Dashboard → http://localhost:3000
+- API + interactive docs → http://localhost:8000/docs
 
-First build takes a while (torch + tensorflow). The first face-recognition
-session also builds the embedding cache (~1 min).
+First build takes ~10–15 min (downloads torch + tensorflow); later builds are cached.
+The first face-recognition session also builds the embeddings cache (~1 min).
 
-### Without Docker
+### Option B — bare processes (fast dev loop; face module needs Docker on Windows)
 
 ```bash
-# Backend
+# Backend — always use a virtual environment
 cd backend
-python -m venv .venv && .venv\Scripts\activate     # Windows
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m venv .venv
+.venv\Scripts\activate                      # Windows  (Linux/macOS: source .venv/bin/activate)
+pip install -r requirements.txt             # on Windows py3.13, tensorflow/deepface may be
+uvicorn app.main:app --port 8000            # unavailable — only the face module is affected
 
 # Frontend (second terminal)
 cd frontend
 npm install
-copy .env.example .env.local                        # points at http://localhost:8000
-npm run dev
+copy .env.example .env.local                # sets NEXT_PUBLIC_API_URL=http://localhost:8000
+npm run dev                                 # http://localhost:3000
 ```
+
+## 4. Configuration reference
+
+All backend settings live in `backend/app/config.py` and are overridable via environment
+variables (see `backend/.env.example`). The important ones:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ANALYSIS_FPS` | `2` | Frames analysed per second — the main CPU-load knob |
+| `MAX_FRAME_WIDTH` | `960` | Downscale frames wider than this before inference |
+| `MAX_CONCURRENT_SESSIONS` | `2` | Parallel analyses allowed on one engine |
+| `MAX_UPLOAD_MB` | `500` | Upload size limit |
+| `CORS_ORIGINS` | `*` | **Set to your dashboard URL in production** (comma-separated) |
+| `FACE_THRESHOLD` | `0.4` | Cosine distance for a face match — lower = stricter |
+| `ATTENDANCE_GAP_MIN` | `5` | Minutes away before a person is logged as checked-in again |
+| `PPE_VIOLATION_PREFIXES` | `no,without` | Class-name prefixes treated as violations |
+| `PPE_NEUTRAL_CLASSES` | `person` | Classes excluded from compliance math |
+| `PPE_CONFIDENCE` | `0.4` | Minimum detection confidence for PPE |
+| `VIOLATION_COOLDOWN_S` | `10` | Dedupe window per violation class |
+| `IDLE_SECONDS` | `10` | Stillness duration before a worker counts as idle |
+| `MOVEMENT_THRESHOLD` | `5.0` | Pixel displacement below which a person is "still" |
+| `PLATE_COOLDOWN_S` | `60` | Dedupe window for re-reads of the same plate |
+| `OCR_LANGS` | `en` | EasyOCR language codes |
+| `MODELS_DIR` / `DATA_DIR` / `DEMO_DIR` / `FACES_DIR` | baked paths | Only override for custom layouts |
+
+Frontend has exactly one variable: `NEXT_PUBLIC_API_URL` — the engine's base URL
+(no trailing slash). It is baked in at **build time**.
+
+## 5. Using the system
+
+1. **Dashboard → New Analysis**: pick a use case → pick a source (demo / upload /
+   RTSP URL) → **Start analysis**.
+2. Watch the live annotated feed. The right-hand panel is use-case specific:
+   attendance log, compliance % and per-class counts, active/idle table, or vehicle log.
+3. **History** page: search and filter every event across all sessions, see the
+   events-per-hour chart, **export CSV**.
+
+### Enrolling faces
+
+Each person = one folder of photos (more photos → better recognition):
+
+```
+backend/faces_db/
+  Jane Doe/
+    front.jpg
+    side.jpg
+```
+
+Then rebuild embeddings: `POST /api/faces/rebuild` (or restart and start a face session —
+the cache builds automatically on first use). Via API you can also upload:
+`POST /api/faces/{name}` with image files, and `DELETE /api/faces/{name}`.
+
+## 6. API reference
+
+Interactive documentation at **`/docs`** (Swagger UI). Summary:
+
+| Method + path | Purpose |
+|---|---|
+| `GET /api/health` | liveness check |
+| `GET /api/usecases` | the four modules with titles/descriptions |
+| `GET /api/demos` · `GET /api/videos` | list demo clips / uploaded videos |
+| `POST /api/videos` | upload a recording (multipart `file`) |
+| `POST /api/sessions` | start an analysis: `{use_case, source_type: rtsp\|upload\|demo, source}` |
+| `GET /api/sessions` | running + recent sessions |
+| `GET /api/sessions/{id}` · `POST /api/sessions/{id}/stop` | inspect / stop |
+| `GET /api/sessions/{id}/stream` | **live annotated MJPEG** (`multipart/x-mixed-replace`) |
+| `GET /api/sessions/{id}/snapshot` | latest annotated frame as JPEG |
+| `GET /api/sessions/{id}/stats` | use-case-specific live stats for the side panel |
+| `GET /api/events` | search events: `session_id, use_case, type, q, hours, limit, offset` |
+| `GET /api/events/export` | CSV download (same filters) |
+| `GET /api/stats/summary?hours=24` | events-per-hour buckets for the chart |
+| `GET/POST/DELETE /api/faces…` | face enrollment (see §5) |
+
+Events are stored in SQLite (`backend/data/visionguard.db`, WAL mode) with schema
+`events(session_id, use_case, type, label, confidence, ts, extra JSON)`.
 
 ---
 
-## 2 · Deploy the backend on Oracle Cloud (Always Free)
+## 7. Deployment — backend on Oracle Cloud (free)
 
-The engine fits comfortably in Oracle's free **Ampere A1** shape (4 OCPU / 24 GB,
-ARM64). All Python dependencies ship aarch64 wheels — no paddle anywhere.
+The engine fits in Oracle's **Always Free** tier: an Ampere A1 VM with up to
+**4 OCPUs / 24 GB RAM (ARM64)** — permanently free, and plenty for this workload.
+All Python dependencies ship aarch64 wheels (this is why the project uses EasyOCR
+instead of PaddleOCR).
 
-### 2.1 Create the VM
+> **Reality check for live cameras:** a cloud VM can only reach cameras that are
+> reachable *from the internet* (public IP / DDNS / VPN). For cameras on a private
+> site LAN, run this same Docker image on any on-site PC instead — the dashboard
+> works identically, just point `NEXT_PUBLIC_API_URL` at it.
 
-1. Sign up at cloud.oracle.com, then **Compute → Instances → Create instance**.
-2. Image: **Ubuntu 22.04 (aarch64)**. Shape: **VM.Standard.A1.Flex** — 4 OCPUs,
-   24 GB (all within Always Free). If you see *Out of capacity*, try another
-   availability domain or retry later; capacity frees up regularly.
-3. Add your SSH public key, create, and note the **public IP**.
+### 7.1 Create the VM
 
-### 2.2 Open the firewall (both layers!)
+1. Sign up at [cloud.oracle.com](https://cloud.oracle.com) (card needed for identity
+   verification — not charged for Always Free resources).
+2. **Compute → Instances → Create instance**
+   - Image: **Ubuntu 22.04** (aarch64)
+   - Shape: **VM.Standard.A1.Flex** → 4 OCPUs, 24 GB RAM (max Always Free)
+   - Paste your **SSH public key**
+3. Create, wait for *Running*, note the **public IP**.
 
-Oracle has a cloud firewall *and* the OS firewall — you must open both.
+> **"Out of capacity"?** Ampere instances are popular. Try a different availability
+> domain, reduce to 2 OCPU/12 GB, or retry later (early morning works best). Once
+> created, the instance is yours to keep.
 
-- Console → your instance → **Virtual Cloud Network → Security Lists → Default**
-  → **Add Ingress Rule**: source `0.0.0.0/0`, protocol TCP, destination port `8000`
-  (and `80,443` if you set up HTTPS below).
-- On the VM:
-  ```bash
-  sudo iptables -I INPUT -p tcp --dport 8000 -j ACCEPT
-  sudo netfilter-persistent save
-  ```
+### 7.2 Open the firewall — BOTH layers
 
-### 2.3 Install Docker and deploy
+Oracle has a **cloud firewall (Security List)** *and* the **OS firewall (iptables)**.
+Traffic must pass both — forgetting one is the #1 deployment problem.
+
+**Cloud layer** — Console → Instance → *Virtual Cloud Network* → *Security Lists* →
+*Default Security List* → **Add Ingress Rules**:
+
+| Source CIDR | Protocol | Dest. port | Purpose |
+|---|---|---|---|
+| `0.0.0.0/0` | TCP | `80` | HTTPS certificate issuance |
+| `0.0.0.0/0` | TCP | `443` | HTTPS API |
+| `0.0.0.0/0` | TCP | `8000` | direct API (optional, for testing) |
+
+**OS layer** — SSH in (`ssh ubuntu@<PUBLIC_IP>`) and run:
 
 ```bash
-sudo apt update && sudo apt install -y docker.io docker-compose-v2
+sudo iptables -I INPUT -p tcp -m multiport --dports 80,443,8000 -j ACCEPT
+sudo apt install -y iptables-persistent && sudo netfilter-persistent save
+```
+
+### 7.3 Install Docker and deploy the engine
+
+```bash
+# On the VM
+sudo apt update && sudo apt install -y docker.io
 sudo usermod -aG docker $USER && newgrp docker
 
-# Get the code onto the VM (git clone, or from your machine:)
-#   scp -r AGS ubuntu@<PUBLIC_IP>:~
-cd AGS/backend
+# Get the code (either)
+git clone https://github.com/<your-user>/<your-repo>.git app && cd app/backend
+# ...or copy from your machine:  scp -r AGS ubuntu@<PUBLIC_IP>:~/app
+
+# Build and run
 docker build -t visionguard .
 docker run -d --name visionguard --restart unless-stopped \
   -p 8000:8000 \
   -v visionguard_data:/app/data \
-  -e CORS_ORIGINS="https://your-app.vercel.app" \
+  -e CORS_ORIGINS="https://<your-app>.vercel.app" \
   visionguard
 ```
 
-Check: `curl http://<PUBLIC_IP>:8000/api/health` → `{"status":"ok"}`.
+Verify:
 
-### 2.4 HTTPS (required for a Vercel frontend)
+```bash
+curl http://localhost:8000/api/health          # on the VM
+curl http://<PUBLIC_IP>:8000/api/health        # from your laptop
+```
 
-Browsers block an `https://` page from calling a plain `http://` API
-(mixed content), so give the backend a free domain + TLS:
+Both must return `{"status":"ok"}`. If the second fails, re-check §7.2.
 
-1. Get a free subdomain at **duckdns.org** pointing to your VM's public IP
-   (e.g. `myvisionguard.duckdns.org`).
-2. Run Caddy as an auto-HTTPS reverse proxy:
+### 7.4 HTTPS — required before connecting the Vercel frontend
+
+Browsers **block** an `https://` page (your Vercel dashboard) from calling a plain
+`http://` API ("mixed content"). Give the engine a domain + TLS certificate — free:
+
+1. **Free subdomain** — at [duckdns.org](https://www.duckdns.org) create e.g.
+   `myvisionguard.duckdns.org` and set it to your VM's public IP.
+2. **Caddy reverse proxy** (automatic Let's Encrypt certificates):
+
    ```bash
    sudo apt install -y caddy
    echo 'myvisionguard.duckdns.org {
@@ -138,79 +306,94 @@ Browsers block an `https://` page from calling a plain `http://` API
    }' | sudo tee /etc/caddy/Caddyfile
    sudo systemctl restart caddy
    ```
-3. Open ports 80 + 443 in both firewalls (step 2.2).
 
-Your API is now `https://myvisionguard.duckdns.org` — use that as
-`NEXT_PUBLIC_API_URL`.
+3. Test: `https://myvisionguard.duckdns.org/api/health` from any browser.
 
-> **Live cameras & networks:** a cloud backend can only reach cameras that are
-> reachable *from the internet*. For cameras on a private site LAN, run this same
-> Docker image on any on-site PC instead — the dashboard works identically.
+Your production API base URL is now **`https://myvisionguard.duckdns.org`**.
 
 ---
 
-## 3 · Deploy the frontend on Vercel (free)
+## 8. Deployment — frontend on Vercel (free)
 
-1. Push this repo to GitHub.
-2. On vercel.com → **Add New Project** → import the repo.
-3. **Root Directory:** `frontend` (Framework preset: Next.js — auto-detected).
-4. Environment variable: `NEXT_PUBLIC_API_URL = https://myvisionguard.duckdns.org`
-   (or `http://<PUBLIC_IP>:8000` if you'll only open the dashboard over http).
-5. Deploy. Then make sure the backend's `CORS_ORIGINS` includes your Vercel URL.
+1. Push the repo to GitHub.
+2. [vercel.com](https://vercel.com) → **Add New… → Project** → import the repo.
+3. **Root Directory:** `frontend` — *this is the critical setting*; the framework
+   preset (Next.js) is then auto-detected.
+4. **Environment variable:**
 
-CLI alternative: `cd frontend && npx vercel --prod`.
+   | Name | Value |
+   |---|---|
+   | `NEXT_PUBLIC_API_URL` | `https://myvisionguard.duckdns.org` |
+
+5. **Deploy.** You'll get `https://<project>.vercel.app`.
+6. **Close the CORS loop** — the backend must allow the dashboard's origin. On the VM:
+
+   ```bash
+   docker rm -f visionguard
+   docker run -d --name visionguard --restart unless-stopped \
+     -p 8000:8000 -v visionguard_data:/app/data \
+     -e CORS_ORIGINS="https://<project>.vercel.app" \
+     visionguard
+   ```
+
+7. Open the dashboard — the nav bar should show **“Engine online.”**
+
+CLI alternative: `cd frontend && npx vercel --prod` (it will prompt for the env var).
+
+### Deployment checklist
+
+- [ ] VM reachable: `curl http://<PUBLIC_IP>:8000/api/health`
+- [ ] HTTPS works: `https://<domain>/api/health` in a browser
+- [ ] Vercel env `NEXT_PUBLIC_API_URL` = the **https** domain (no trailing slash)
+- [ ] Backend `CORS_ORIGINS` = the exact Vercel URL (scheme + host, no trailing slash)
+- [ ] Dashboard nav shows *Engine online*; a demo-video session streams live
 
 ---
 
-## 4 · Using the system
+## 9. Updating a deployed system
 
-1. **Dashboard → New Analysis**: pick a use case, pick a source
-   (demo video / upload / RTSP URL), press **Start analysis**.
-2. Watch the live annotated feed; the side panel shows use-case specific stats
-   (attendance log, compliance %, idle workers, vehicle log).
-3. **History** page: filter and search all events, see events-per-hour, export CSV.
+**Backend** (on the VM):
 
-### Enrolling faces
-
-Each person is a folder of photos under `backend/faces_db/`:
-
+```bash
+cd ~/app && git pull
+cd backend && docker build -t visionguard .
+docker rm -f visionguard
+docker run -d --name visionguard --restart unless-stopped \
+  -p 8000:8000 -v visionguard_data:/app/data \
+  -e CORS_ORIGINS="https://<project>.vercel.app" visionguard
 ```
-faces_db/
-  Jane Doe/
-    front.jpg
-    side.jpg
-```
 
-Or via API: `POST /api/faces/{name}` with image files, then
-`POST /api/faces/rebuild`. More photos per person → better recognition.
+The named volume `visionguard_data` preserves the event database, uploads and face
+embeddings across updates.
 
-### Key settings (backend `.env`)
+**Frontend**: just `git push` — Vercel redeploys automatically on every push to the
+production branch. Changing `NEXT_PUBLIC_API_URL` requires a **redeploy** (it's baked
+at build time).
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `ANALYSIS_FPS` | 2 | frames analysed per second (CPU load knob) |
-| `MAX_CONCURRENT_SESSIONS` | 2 | parallel analyses |
-| `CORS_ORIGINS` | * | set to your dashboard URL in production |
-| `FACE_THRESHOLD` | 0.4 | lower = stricter face match |
-| `IDLE_SECONDS` | 10 | stillness before a worker counts as idle |
-| `PPE_VIOLATION_PREFIXES` | no,without | class-name prefixes that count as violations |
-| `PLATE_COOLDOWN_S` | 60 | dedupe window for repeated plate reads |
+## 10. Adding a new detection module
 
-Full list: `backend/.env.example`.
+1. Create `backend/app/modules/<name>.py` implementing `BaseModule`
+   (`process_frame(frame, ts) -> (annotated_frame, events)`, `get_stats() -> dict`).
+   Keep heavy imports (torch, model load) inside `__init__`, not at module top level.
+2. Register it in `backend/app/modules/__init__.py` → `_REGISTRY` (key, class name,
+   title, description).
+3. Add the use-case color + label in `frontend/lib/api.js` (and a matching CSS variable
+   in `frontend/app/globals.css`).
+4. Optional: a dedicated stats panel in `frontend/app/session/[id]/page.jsx`.
 
----
+Events you emit (`{type, label, confidence?, extra?}`) are persisted, searchable,
+charted and exported automatically.
 
-## API overview
+## 11. Troubleshooting
 
-Interactive docs at `/docs`. Highlights:
-
-| Endpoint | Purpose |
+| Symptom | Cause → fix |
 |---|---|
-| `POST /api/sessions` | start an analysis `{use_case, source_type, source}` |
-| `GET /api/sessions/{id}/stream` | live annotated MJPEG |
-| `GET /api/sessions/{id}/stats` | use-case specific live stats |
-| `POST /api/sessions/{id}/stop` | stop a session |
-| `POST /api/videos` | upload a recording |
-| `GET /api/events` | search events (`q`, `use_case`, `hours`, …) |
-| `GET /api/events/export` | CSV export |
-| `POST /api/faces/{name}` / `rebuild` | face enrollment |
+| Dashboard says *Engine offline* | Wrong `NEXT_PUBLIC_API_URL`, CORS not set, or engine down. Check browser dev-tools console: CORS errors name the missing origin. |
+| Works via IP, fails from Vercel | Mixed content — you're calling `http://` from an `https://` page. Do §7.4. |
+| `curl http://<IP>:8000` times out | One of the two firewall layers (§7.2) is closed. |
+| Face session returns 503 | deepface/tensorflow not installed (bare-metal Windows). Use Docker, or accept that only the face module is disabled. |
+| First ANPR session very slow to start | EasyOCR downloads its OCR models (~100 MB) once; subsequent sessions are fast. |
+| "Maximum concurrent sessions reached" | Stop a session or raise `MAX_CONCURRENT_SESSIONS` (watch CPU). |
+| RTSP session errors immediately | URL wrong/unreachable *from the engine machine*. Test with VLC on that machine first. |
+| Oracle "Out of capacity" | See §7.1 tip — retry, smaller shape, or another availability domain. |
+| Video chops/stutters in live view | That's expected: analysis runs at `ANALYSIS_FPS` (2/s). Raise it if your CPU allows. |
