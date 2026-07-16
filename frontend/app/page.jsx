@@ -10,9 +10,8 @@ export default function Dashboard() {
   const [useCases, setUseCases] = useState([]);
   const [sessions, setSessions] = useState({ live: [], history: [] });
   const [useCase, setUseCase] = useState(null);
-  const [sourceTab, setSourceTab] = useState("demo");
+  const [sourceTab, setSourceTab] = useState("upload");
   const [rtspUrl, setRtspUrl] = useState("");
-  const [demoList, setDemoList] = useState([]);
   const [uploadList, setUploadList] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -24,7 +23,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     api("/usecases").then(setUseCases).catch(() => setError("Cannot reach the backend engine. Is it running?"));
-    api("/demos").then(setDemoList).catch(() => {});
     api("/videos").then(setUploadList).catch(() => {});
     refreshSessions();
     const t = setInterval(refreshSessions, 5000);
@@ -101,7 +99,6 @@ export default function Dashboard() {
         <h3>2 · Video source</h3>
         <div className="tabs">
           {[
-            ["demo", "Demo video"],
             ["upload", "Upload recording"],
             ["rtsp", "Live IP camera"],
           ].map(([key, label]) => (
@@ -148,10 +145,6 @@ export default function Dashboard() {
             </div>
             <FilePick list={uploadList} selected={selectedFile} onSelect={setSelectedFile} empty="No uploads yet." />
           </div>
-        )}
-
-        {sourceTab === "demo" && (
-          <FilePick list={demoList} selected={selectedFile} onSelect={setSelectedFile} empty="No demo videos bundled." />
         )}
       </div>
 
