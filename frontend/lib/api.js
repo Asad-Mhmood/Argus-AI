@@ -50,6 +50,39 @@ export const USE_CASE_LABELS = {
   anpr: "ANPR",
 };
 
+/** Static module catalog — the home page and module workspaces render from this
+ *  even when the engine is offline. Keys match the backend registry. */
+export const USE_CASES = [
+  {
+    key: "face_attendance",
+    title: "Face Attendance",
+    description:
+      "Recognize enrolled people on camera and keep an attendance log with arrival and last-seen times.",
+  },
+  {
+    key: "ppe",
+    title: "PPE Safety Compliance",
+    description:
+      "Detect missing helmets, vests and other safety-gear violations, and track the site compliance rate.",
+  },
+  {
+    key: "activity",
+    title: "Activity Monitoring",
+    description:
+      "Track people via pose keypoints and flag workers who stay idle beyond a set threshold.",
+  },
+  {
+    key: "anpr",
+    title: "License Plate Recognition",
+    description:
+      "Detect and read vehicle license plates, logging every unique plate with date and time.",
+  },
+];
+
+export const USE_CASE_TITLES = Object.fromEntries(
+  USE_CASES.map((u) => [u.key, u.title])
+);
+
 export function fmtTime(ts) {
   if (!ts) return "—";
   return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });

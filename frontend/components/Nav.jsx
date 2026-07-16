@@ -40,10 +40,8 @@ export default function Nav() {
   }
 
   const links = [
-    { href: "/", label: "Dashboard" },
-    { href: "/attendance", label: "Attendance" },
-    { href: "/faces", label: "People" },
-    { href: "/history", label: "History" },
+    { href: "/", label: "Modules" },
+    { href: "/status", label: "System Status" },
   ];
 
   return (
@@ -56,7 +54,11 @@ export default function Nav() {
         <Link
           key={l.href}
           href={l.href}
-          className={`link ${pathname === l.href ? "active" : ""}`}
+          className={`link ${
+            pathname === l.href || (l.href === "/" && pathname.startsWith("/module"))
+              ? "active"
+              : ""
+          }`}
         >
           {l.label}
         </Link>

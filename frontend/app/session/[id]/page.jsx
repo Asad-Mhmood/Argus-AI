@@ -1,9 +1,10 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   apiUrl, api, fmtDateTime, fmtDuration, fmtTime,
-  USE_CASE_COLORS, USE_CASE_LABELS,
+  USE_CASE_COLORS, USE_CASE_LABELS, USE_CASE_TITLES,
 } from "@/lib/api";
 import { StatusBadge, Tile } from "@/components/ui";
 
@@ -32,6 +33,9 @@ export default function SessionPage() {
 
   return (
     <>
+      <Link href={`/module/${session.use_case}`} className="backlink">
+        ← {USE_CASE_TITLES[session.use_case] || "Module"}
+      </Link>
       <div className="row" style={{ marginBottom: 4 }}>
         <h1 className="page-title" style={{ marginBottom: 0 }}>
           <span className="chip" style={{ background: USE_CASE_COLORS[session.use_case], width: 12, height: 12 }} />
