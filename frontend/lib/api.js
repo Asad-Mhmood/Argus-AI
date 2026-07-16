@@ -1,8 +1,31 @@
-export const API_URL =
+const DEFAULT_API_URL =
   (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
+const ENGINE_KEY = "vg_engine_url";
+
+/** Engine base URL — a browser-saved override (Settings in the nav) beats the build-time env. */
+export function apiUrl() {
+  if (typeof window !== "undefined") {
+    const saved = window.localStorage.getItem(ENGINE_KEY);
+    if (saved) return saved.replace(/\/$/, "");
+  }
+  return DEFAULT_API_URL;
+}
+
+export function setEngineUrl(url) {
+  if (url && url.trim()) {
+    window.localStorage.setItem(ENGINE_KEY, url.trim().replace(/\/$/, ""));
+  } else {
+    window.localStorage.removeItem(ENGINE_KEY);
+  }
+}
+
+export function isEngineOverridden() {
+  return typeof window !== "undefined" && !!window.localStorage.getItem(ENGINE_KEY);
+}
+
 export async function api(path, options = {}) {
-  const res = await fetch(`${API_URL}/api${path}`, options);
+  const res = await fetch(`${apiUrl()}/api${path}`, options);
   if (!res.ok) {
     let detail = res.statusText;
     try {

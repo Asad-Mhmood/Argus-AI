@@ -8,9 +8,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install dependencies first for better layer caching
+# Install dependencies in separate layers so a failed download resumes from the
+# last completed layer instead of restarting everything. Torch comes from the
+# CPU-only index: ~200 MB instead of the 3+ GB CUDA build pip would pull on amd64.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout 180 --retries 10 \
+        torch torchvision --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir --timeout 180 --retries 10 tensorflow tf-keras
+RUN pip install --no-cache-dir --timeout 180 --retries 10 -r requirements.txt
 
 # Application code + bundled assets
 COPY app ./app
@@ -20,7 +25,14 @@ COPY faces_db ./faces_db
 
 # Writable state (SQLite DB, uploads, embedding cache) lives in /app/data — mount a volume here
 ENV DATA_DIR=/app/data
-RUN mkdir -p /app/data
+
+# Non-root user (required by Hugging Face Spaces, good practice everywhere).
+# HOME must be writable: ultralytics/easyocr/deepface cache models under $HOME.
+RUN useradd -m -u 1000 appuser \
+    && mkdir -p /app/data \
+    && chown -R appuser:appuser /app
+ENV HOME=/home/appuser
+USER appuser
 
 EXPOSE 8000
 

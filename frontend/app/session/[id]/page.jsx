@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import {
-  API_URL, api, fmtDateTime, fmtDuration, fmtTime,
+  apiUrl, api, fmtDateTime, fmtDuration, fmtTime,
   USE_CASE_COLORS, USE_CASE_LABELS,
 } from "@/lib/api";
 import { StatusBadge, Tile } from "@/components/ui";
@@ -52,7 +52,7 @@ export default function SessionPage() {
             // MJPEG while live; final snapshot afterwards
             <img
               className="live-frame"
-              src={`${API_URL}/api/sessions/${id}/${live ? "stream" : "snapshot"}`}
+              src={`${apiUrl()}/api/sessions/${id}/${live ? "stream" : "snapshot"}`}
               alt="Annotated video feed"
             />
           ) : (
@@ -68,7 +68,7 @@ export default function SessionPage() {
                 ■ Stop session
               </button>
             )}
-            <a className="btn" href={`${API_URL}/api/events/export?session_id=${id}`}>
+            <a className="btn" href={`${apiUrl()}/api/events/export?session_id=${id}`}>
               ⬇ Export CSV
             </a>
           </div>

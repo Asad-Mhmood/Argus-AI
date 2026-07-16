@@ -2,13 +2,18 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, apiUrl, isEngineOverridden, setEngineUrl } from "@/lib/api";
 
 export default function Nav() {
   const pathname = usePathname();
   const [apiUp, setApiUp] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
+  const [overridden, setOverridden] = useState(false);
 
   useEffect(() => {
+    setUrlInput(apiUrl());
+    setOverridden(isEngineOverridden());
     let alive = true;
     const check = () =>
       api("/health").then(
@@ -22,6 +27,17 @@ export default function Nav() {
       clearInterval(t);
     };
   }, []);
+
+  function saveEngine(e) {
+    e.preventDefault();
+    setEngineUrl(urlInput);
+    window.location.reload();
+  }
+
+  function resetEngine() {
+    setEngineUrl(null);
+    window.location.reload();
+  }
 
   const links = [
     { href: "/", label: "Dashboard" },
@@ -48,6 +64,41 @@ export default function Nav() {
         <span className={`pip ${apiUp === null ? "" : apiUp ? "ok" : "down"}`} />
         {apiUp === null ? "Connecting…" : apiUp ? "Engine online" : "Engine offline"}
       </span>
+      <button
+        type="button"
+        className="btn sm"
+        onClick={() => setShowSettings((s) => !s)}
+        title="Engine connection settings"
+      >
+        ⚙ Engine{overridden ? " *" : ""}
+      </button>
+
+      {showSettings && (
+        <form className="engine-panel" onSubmit={saveEngine}>
+          <label className="field-label" htmlFor="engine-url">
+            Engine URL
+          </label>
+          <input
+            id="engine-url"
+            className="input"
+            placeholder="https://xxxx.trycloudflare.com"
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+          />
+          <p className="muted" style={{ margin: "6px 0 10px" }}>
+            Paste your engine's public URL (e.g. from Cloudflare Tunnel). Saved in
+            this browser only.
+          </p>
+          <div className="row">
+            <button type="submit" className="btn sm primary">Save &amp; reload</button>
+            {overridden && (
+              <button type="button" className="btn sm" onClick={resetEngine}>
+                Reset to default
+              </button>
+            )}
+          </div>
+        </form>
+      )}
     </nav>
   );
 }

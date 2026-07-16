@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import {
-  API_URL, api, fmtDateTime, USE_CASE_COLORS, USE_CASE_LABELS,
+  apiUrl, api, fmtDateTime, USE_CASE_COLORS, USE_CASE_LABELS,
 } from "@/lib/api";
 import StackedBarChart from "@/components/StackedBarChart";
 
@@ -72,7 +72,7 @@ export default function HistoryPage() {
             value={q} onChange={(e) => setQ(e.target.value)}
           />
         </div>
-        <a className="btn" href={`${API_URL}/api/events/export?${exportParams}`}>⬇ Export CSV</a>
+        <a className="btn" href={`${apiUrl()}/api/events/export?${exportParams}`}>⬇ Export CSV</a>
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
