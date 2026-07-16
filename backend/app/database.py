@@ -177,3 +177,84 @@ def attendance_log(session_id: str) -> list[dict]:
             (session_id,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def count_events(session_id: str, event_type: str) -> int:
+    with _lock:
+        row = _db().execute(
+            "SELECT COUNT(*) AS n FROM events WHERE session_id=? AND type=?",
+            (session_id, event_type),
+        ).fetchone()
+    return row["n"]
+
+
+# ---------- attendance (cross-session) ----------
+
+# Day buckets follow the engine's local timezone so "today" matches the clock
+# of the machine running the analysis.
+_DAY = "date(ts, 'unixepoch', 'localtime')"
+
+
+def _date_filters(sql: str, args: list, date_from: Optional[str], date_to: Optional[str]) -> str:
+    if date_from:
+        sql += f" AND {_DAY} >= ?"
+        args.append(date_from)
+    if date_to:
+        sql += f" AND {_DAY} <= ?"
+        args.append(date_to)
+    return sql
+
+
+def attendance_records(
+    person: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: int = 500,
+) -> list[dict]:
+    """Per-day, per-person attendance: first arrival, last sighting, check-in count."""
+    sql = (
+        f"SELECT {_DAY} AS day, label AS name, MIN(ts) AS first_seen, "
+        "MAX(ts) AS last_seen, COUNT(*) AS check_ins "
+        "FROM events WHERE use_case='face_attendance' AND type='check_in'"
+    )
+    args: list[Any] = []
+    if person:
+        sql += " AND label LIKE ?"
+        args.append(f"%{person}%")
+    sql = _date_filters(sql, args, date_from, date_to)
+    sql += " GROUP BY day, name ORDER BY day DESC, first_seen LIMIT ?"
+    args.append(limit)
+    with _lock:
+        rows = _db().execute(sql, args).fetchall()
+    return [dict(r) for r in rows]
+
+
+def attendance_unknown_daily(
+    date_from: Optional[str] = None, date_to: Optional[str] = None
+) -> list[dict]:
+    sql = (
+        f"SELECT {_DAY} AS day, COUNT(*) AS count "
+        "FROM events WHERE use_case='face_attendance' AND type='unknown_face'"
+    )
+    args: list[Any] = []
+    sql = _date_filters(sql, args, date_from, date_to)
+    sql += " GROUP BY day ORDER BY day DESC"
+    with _lock:
+        rows = _db().execute(sql, args).fetchall()
+    return [dict(r) for r in rows]
+
+
+def attendance_unknown_log(
+    date_from: Optional[str] = None, date_to: Optional[str] = None, limit: int = 100
+) -> list[dict]:
+    sql = (
+        "SELECT ts, session_id FROM events "
+        "WHERE use_case='face_attendance' AND type='unknown_face'"
+    )
+    args: list[Any] = []
+    sql = _date_filters(sql, args, date_from, date_to)
+    sql += " ORDER BY ts DESC LIMIT ?"
+    args.append(limit)
+    with _lock:
+        rows = _db().execute(sql, args).fetchall()
+    return [dict(r) for r in rows]

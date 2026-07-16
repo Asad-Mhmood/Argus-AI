@@ -65,7 +65,11 @@ Module-specific semantics worth knowing:
   (`PPE_VIOLATION_PREFIXES`, default `no,without` — also catches `none`); `Person` is neutral
   via `PPE_NEUTRAL_CLASSES` and excluded from the compliance rate.
 - **face_attendance**: embeddings cache in `backend/data/face_embeddings.json`, built from
-  `backend/faces_db/<person>/*.jpg`; rebuild via `POST /api/faces/rebuild`.
+  `backend/faces_db/<person>/*.jpg`; rebuild via `POST /api/faces/rebuild` (enroll/delete
+  auto-rebuild, degrading gracefully when deepface is missing). Unrecognized faces emit
+  `unknown_face` events deduped by `UNKNOWN_FACE_COOLDOWN_S`. Cross-session dashboard data
+  comes from `GET /api/attendance` (person + date filters); frontend pages: `/faces`
+  (enrollment) and `/attendance` (dashboard).
 - **anpr** and **ppe** deduplicate events with cooldown windows (`PLATE_COOLDOWN_S`,
   `VIOLATION_COOLDOWN_S`) so the log isn't flooded.
 

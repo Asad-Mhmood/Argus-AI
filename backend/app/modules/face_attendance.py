@@ -3,7 +3,8 @@
 Enrollment: each subfolder of FACES_DIR is one person, holding one or more photos.
 Embeddings are averaged per person and cached to JSON. A person is 'checked in'
 the first time they are recognized, and re-logged if they reappear after
-ATTENDANCE_GAP_MIN minutes away.
+ATTENDANCE_GAP_MIN minutes away. Faces matching nobody are labeled "Unknown"
+and logged as 'unknown_face' events, deduped by UNKNOWN_FACE_COOLDOWN_S.
 """
 import json
 import logging
@@ -59,6 +60,9 @@ def build_database(force: bool = False) -> dict:
     with _db_lock:
         if not force and CACHE_FILE.exists():
             return json.loads(CACHE_FILE.read_text())
+        # Fail fast if the embedding stack is missing — otherwise every image would
+        # be skipped below and a good cache silently overwritten with an empty one.
+        from deepface import DeepFace  # noqa: F401
         import cv2
         from ultralytics import YOLO
 
@@ -110,6 +114,8 @@ class FaceAttendanceModule(BaseModule):
         }
         # name -> {"first_seen": ts, "last_seen": ts, "sightings": int}
         self.people: dict[str, dict] = {}
+        self.unknown_detections = 0
+        self._last_unknown_ts = 0.0
 
     def _recognize(self, face_crop: np.ndarray) -> tuple[str, float]:
         try:
@@ -145,6 +151,11 @@ class FaceAttendanceModule(BaseModule):
             confidence = round(1 - dist, 3) if known else None
             draw_box(frame, (x1, y1, x2, y2), name, COLOR_OK if known else COLOR_ALERT)
             if not known:
+                if ts - self._last_unknown_ts >= config.UNKNOWN_FACE_COOLDOWN_S:
+                    self._last_unknown_ts = ts
+                    self.unknown_detections += 1
+                    events.append({"type": "unknown_face", "label": "Unknown",
+                                   "confidence": None, "ts": ts})
                 continue
             record = self.people.get(name)
             gap = config.ATTENDANCE_GAP_MIN * 60
@@ -163,6 +174,7 @@ class FaceAttendanceModule(BaseModule):
         now = time.time()
         return {
             "enrolled": len(self.known),
+            "unknown_detections": self.unknown_detections,
             "people": [
                 {
                     "name": name,

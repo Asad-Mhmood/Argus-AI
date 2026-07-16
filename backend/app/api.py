@@ -163,7 +163,10 @@ def session_stats(session_id: str) -> dict:
         raise HTTPException(404, "Session not found")
     stats: dict = {}
     if row["use_case"] == "face_attendance":
-        stats = {"people": database.attendance_log(session_id)}
+        stats = {
+            "people": database.attendance_log(session_id),
+            "unknown_detections": database.count_events(session_id, "unknown_face"),
+        }
     return {"session": row, "stats": stats}
 
 
@@ -217,6 +220,20 @@ def stats_summary(hours: int = Query(24, le=24 * 30)) -> dict:
 
 # ---------- face enrollment ----------
 
+def _try_rebuild() -> dict:
+    """Rebuild the embeddings cache, degrading gracefully when the recognition
+    stack (deepface/tensorflow) isn't installed on this machine."""
+    from .modules.face_attendance import build_database
+
+    try:
+        known = build_database(force=True)
+    except ImportError as exc:
+        return {"rebuilt": False,
+                "note": f"Embeddings not rebuilt — {exc}. Run POST /api/faces/rebuild "
+                        "on an engine with the full stack (e.g. the Docker image)."}
+    return {"rebuilt": True, "identities": len(known)}
+
+
 @router.get("/faces")
 def faces() -> list[dict]:
     from .modules.face_attendance import list_identities
@@ -224,9 +241,25 @@ def faces() -> list[dict]:
     return list_identities()
 
 
+# NB: must be declared before POST /faces/{name}, or "rebuild" is routed as a person name
+@router.post("/faces/rebuild")
+def rebuild_faces() -> dict:
+    from .modules.face_attendance import build_database
+
+    try:
+        known = build_database(force=True)
+    except ImportError as exc:
+        raise HTTPException(
+            503, f"Face stack unavailable on this engine: {exc}. "
+                 "Use the Docker image (or install the full requirements.txt).",
+        ) from exc
+    return {"identities": len(known), "names": sorted(known)}
+
+
 @router.post("/faces/{name}")
-def add_face(name: str, files: list[UploadFile] = File(...)) -> dict:
-    person_dir = config.FACES_DIR / _safe_name(name)
+def add_face(name: str, files: list[UploadFile] = File(...), rebuild: bool = True) -> dict:
+    clean = _safe_name(name)
+    person_dir = config.FACES_DIR / clean
     person_dir.mkdir(exist_ok=True)
     saved = 0
     for f in files:
@@ -239,22 +272,44 @@ def add_face(name: str, files: list[UploadFile] = File(...)) -> dict:
         saved += 1
     if not saved:
         raise HTTPException(400, f"No valid images. Use: {', '.join(sorted(IMAGE_EXTS))}")
-    return {"name": name, "saved": saved,
-            "note": "Call POST /api/faces/rebuild to refresh embeddings."}
+    out = {"name": clean, "saved": saved}
+    out.update(_try_rebuild() if rebuild else
+               {"rebuilt": False, "note": "Call POST /api/faces/rebuild to refresh embeddings."})
+    return out
 
 
 @router.delete("/faces/{name}")
-def delete_face(name: str) -> dict:
+def delete_face(name: str, rebuild: bool = True) -> dict:
     person_dir = config.FACES_DIR / _safe_name(name)
     if not person_dir.is_dir():
         raise HTTPException(404, "Identity not found")
     shutil.rmtree(person_dir)
-    return {"deleted": name, "note": "Call POST /api/faces/rebuild to refresh embeddings."}
+    out = {"deleted": _safe_name(name)}
+    out.update(_try_rebuild() if rebuild else
+               {"rebuilt": False, "note": "Call POST /api/faces/rebuild to refresh embeddings."})
+    return out
 
 
-@router.post("/faces/rebuild")
-def rebuild_faces() -> dict:
-    from .modules.face_attendance import build_database
+# ---------- attendance dashboard ----------
 
-    known = build_database(force=True)
-    return {"identities": len(known), "names": sorted(known)}
+@router.get("/attendance")
+def attendance(
+    person: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: int = Query(500, le=2000),
+) -> dict:
+    records = database.attendance_records(person, date_from, date_to, limit)
+    unknown_daily = database.attendance_unknown_daily(date_from, date_to)
+    unknown_recent = database.attendance_unknown_log(date_from, date_to, limit=100)
+    unknown_total = sum(r["count"] for r in unknown_daily)
+    return {
+        "records": records,
+        "unknown": {"daily": unknown_daily, "recent": unknown_recent, "total": unknown_total},
+        "summary": {
+            "days": len({r["day"] for r in records} | {u["day"] for u in unknown_daily}),
+            "people": len({r["name"] for r in records}),
+            "check_ins": sum(r["check_ins"] for r in records),
+            "unknown_total": unknown_total,
+        },
+    }

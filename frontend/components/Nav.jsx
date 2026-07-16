@@ -41,6 +41,8 @@ export default function Nav() {
 
   const links = [
     { href: "/", label: "Dashboard" },
+    { href: "/attendance", label: "Attendance" },
+    { href: "/faces", label: "People" },
     { href: "/history", label: "History" },
   ];
 

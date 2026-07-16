@@ -107,6 +107,7 @@ function AttendancePanel({ stats }) {
       <div className="grid cols-2">
         <Tile label="Enrolled identities" value={stats.enrolled ?? "—"} />
         <Tile label="Seen this session" value={people.length} />
+        <Tile label="Unknown detections" value={stats.unknown_detections ?? 0} />
       </div>
       <div className="card mt">
         <h3>Attendance log</h3>

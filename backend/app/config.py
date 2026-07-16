@@ -38,6 +38,7 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
 FACE_THRESHOLD = float(os.getenv("FACE_THRESHOLD", "0.4"))            # cosine distance
 FACE_EMBED_MODEL = os.getenv("FACE_EMBED_MODEL", "ArcFace")
 ATTENDANCE_GAP_MIN = float(os.getenv("ATTENDANCE_GAP_MIN", "5"))      # re-log after N min away
+UNKNOWN_FACE_COOLDOWN_S = float(os.getenv("UNKNOWN_FACE_COOLDOWN_S", "30"))  # dedupe unknown-face events
 PPE_VIOLATION_PREFIXES = [
     p.strip().lower()
     for p in os.getenv("PPE_VIOLATION_PREFIXES", "no,without").split(",")
