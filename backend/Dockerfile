@@ -34,6 +34,11 @@ RUN useradd -m -u 1000 appuser \
 ENV HOME=/home/appuser
 USER appuser
 
+# Bake runtime model downloads into the image (EasyOCR ~100MB, ArcFace ~130MB)
+# so first sessions start instantly and containers work offline.
+RUN python -c "import easyocr; easyocr.Reader(['en'], gpu=False)" \
+    && python -c "from deepface import DeepFace; DeepFace.build_model('ArcFace')"
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \

@@ -24,10 +24,30 @@ _db_lock = threading.Lock()
 
 
 def _represent(img) -> list:
-    """Lazy DeepFace import so the rest of the app works without tensorflow."""
+    """Embed an already-cropped face. detector_backend='skip' because detection is
+    always done by our YOLO face model — DeepFace's own detectors (haarcascade)
+    aren't shipped by every opencv build. Lazy import so the rest of the app
+    works without tensorflow."""
     from deepface import DeepFace
 
-    return DeepFace.represent(img, model_name=config.FACE_EMBED_MODEL, enforce_detection=False)
+    return DeepFace.represent(
+        img,
+        model_name=config.FACE_EMBED_MODEL,
+        enforce_detection=False,
+        detector_backend="skip",
+    )
+
+
+def _crop_largest_face(img: np.ndarray, detector) -> np.ndarray:
+    """Crop the most prominent face from an enrollment photo (fallback: whole image)."""
+    boxes = detector(img, verbose=False)[0].boxes.xyxy.cpu().numpy()
+    if len(boxes) == 0:
+        return img
+    x1, y1, x2, y2 = max(boxes, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+    h, w = img.shape[:2]
+    x1, y1 = max(0, int(x1)), max(0, int(y1))
+    x2, y2 = min(w, int(x2)), min(h, int(y2))
+    return img[y1:y2, x1:x2]
 
 
 def _cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
@@ -39,6 +59,10 @@ def build_database(force: bool = False) -> dict:
     with _db_lock:
         if not force and CACHE_FILE.exists():
             return json.loads(CACHE_FILE.read_text())
+        import cv2
+        from ultralytics import YOLO
+
+        detector = YOLO(config.FACE_MODEL)
         known: dict = {}
         for person_dir in sorted(Path(config.FACES_DIR).iterdir()):
             if not person_dir.is_dir():
@@ -48,7 +72,10 @@ def build_database(force: bool = False) -> dict:
                 if img_path.suffix.lower() not in IMAGE_EXTS:
                     continue
                 try:
-                    rep = _represent(str(img_path))
+                    img = cv2.imread(str(img_path))
+                    if img is None:
+                        raise ValueError("unreadable image")
+                    rep = _represent(_crop_largest_face(img, detector))
                     if rep and "embedding" in rep[0]:
                         embeddings.append(rep[0]["embedding"])
                 except Exception as exc:  # noqa: BLE001 — skip bad images, keep enrolling

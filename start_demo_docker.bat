@@ -2,6 +2,9 @@
 REM ============================================================
 REM  VisionGuard AI — one-click public demo (DOCKER edition)
 REM  All 4 modules incl. face recognition. Needs Docker Desktop.
+REM
+REM  WARNING: needs a machine with 8+ GB RAM. On smaller machines
+REM  the engine gets killed mid-analysis — use start_demo.bat there.
 REM ============================================================
 
 echo Checking Docker...

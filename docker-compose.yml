@@ -6,6 +6,10 @@ services:
     environment:
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - ANALYSIS_FPS=${ANALYSIS_FPS:-2}
+      # one session at a time by default — safe on low-RAM machines; raise on servers
+      - MAX_CONCURRENT_SESSIONS=${MAX_CONCURRENT_SESSIONS:-1}
+      # smaller frames keep inference inside tight Docker memory limits; raise on servers
+      - MAX_FRAME_WIDTH=${MAX_FRAME_WIDTH:-640}
     volumes:
       - backend_data:/app/data            # SQLite DB, uploads, embedding cache
       - ./backend/faces_db:/app/faces_db  # live face enrollment persists on host

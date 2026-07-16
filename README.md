@@ -106,9 +106,11 @@ legacy/                   original prototype scripts (reference only)
 
 ## 3. Running locally
 
-### Option A — Docker (recommended, runs everything incl. face recognition)
+### Option A — Docker (runs everything incl. face recognition)
 
-Prerequisite: Docker Desktop (Windows/macOS) or Docker Engine (Linux).
+Prerequisite: Docker Desktop (Windows/macOS) or Docker Engine (Linux), and a machine
+with **at least 8 GB RAM** — model inference inside the container needs ~2–3 GB; on
+smaller machines the kernel OOM-kills the engine mid-session (use Option B there).
 
 ```bash
 docker compose up --build
@@ -120,15 +122,15 @@ docker compose up --build
 First build takes ~10–15 min (downloads torch + tensorflow); later builds are cached.
 The first face-recognition session also builds the embeddings cache (~1 min).
 
-### Option B — bare processes (fast dev loop; face module needs Docker on Windows)
+### Option B — bare processes (fast dev loop, all 4 modules)
 
 ```bash
 # Backend — always use a virtual environment
 cd backend
 python -m venv .venv
 .venv\Scripts\activate                      # Windows  (Linux/macOS: source .venv/bin/activate)
-pip install -r requirements.txt             # on Windows py3.13, tensorflow/deepface may be
-uvicorn app.main:app --port 8000            # unavailable — only the face module is affected
+pip install -r requirements.txt
+uvicorn app.main:app --port 8000
 
 # Frontend (second terminal)
 cd frontend
@@ -391,9 +393,10 @@ charted and exported automatically.
 | Dashboard says *Engine offline* | Wrong `NEXT_PUBLIC_API_URL`, CORS not set, or engine down. Check browser dev-tools console: CORS errors name the missing origin. |
 | Works via IP, fails from Vercel | Mixed content — you're calling `http://` from an `https://` page. Do §7.4. |
 | `curl http://<IP>:8000` times out | One of the two firewall layers (§7.2) is closed. |
-| Face session returns 503 | deepface/tensorflow not installed (bare-metal Windows). Use Docker, or accept that only the face module is disabled. |
+| Face session returns 503 | deepface/tensorflow not installed in the environment — `pip install tensorflow tf-keras deepface`. Only the face module is affected. |
 | First ANPR session very slow to start | EasyOCR downloads its OCR models (~100 MB) once; subsequent sessions are fast. |
 | "Maximum concurrent sessions reached" | Stop a session or raise `MAX_CONCURRENT_SESSIONS` (watch CPU). |
 | RTSP session errors immediately | URL wrong/unreachable *from the engine machine*. Test with VLC on that machine first. |
+| Docker engine restarts mid-session, no error in logs | Out-of-memory kill — the host gives Docker too little RAM (needs ~2–3 GB free for inference). Run the bare-Python engine instead, or use a machine with ≥8 GB. |
 | Oracle "Out of capacity" | See §7.1 tip — retry, smaller shape, or another availability domain. |
 | Video chops/stutters in live view | That's expected: analysis runs at `ANALYSIS_FPS` (2/s). Raise it if your CPU allows. |

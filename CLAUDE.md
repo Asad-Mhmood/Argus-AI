@@ -34,7 +34,8 @@ Interactive API docs at `http://localhost:8000/docs`.
 
 - **CPU-only, no GPU.** The whole design assumes low-FPS analysis (`ANALYSIS_FPS=2`, frame-dropping for live streams). Don't add anything that requires real-time full-FPS inference.
 - **ARM64 deploy target** (Oracle Cloud Ampere, via `backend/Dockerfile`). Every backend dependency must ship aarch64 Linux wheels — no paddle/paddleocr (EasyOCR is the OCR engine).
-- **Face recognition doesn't run on this Windows machine** (deepface needs tensorflow; no TF wheel for Windows Python 3.13). It works only inside Docker (Linux/py3.11). The module system tolerates this: heavy imports are lazy, so the missing dep 503s only that use case.
+- **Face recognition runs everywhere, including this Windows machine** (TF ≥2.21 ships Windows py3.13 wheels; installed in `backend/.venv` and verified July 2026). DeepFace is used with `detector_backend="skip"` — detection is always our YOLO face model; never rely on DeepFace's own detectors (opencv 5 headless doesn't ship haarcascades). Heavy imports stay lazy, so a missing dep 503s only that use case.
+- **Docker inference does NOT work on this dev machine either** — the host has 4 GB RAM (Docker/WSL2 gets ~1.8 GB) and the kernel OOM-kills the engine mid-inference, even at 640px frames (verified July 2026). The image itself is correct (builds, API works, face module verified). Local dev/demo runs use the venv (`start_demo.bat`); Docker is for ≥8 GB machines and servers.
 - All backend tuning lives in `backend/app/config.py`, entirely env-overridable — never hardcode paths or thresholds elsewhere. Documented in `backend/.env.example`.
 
 ## Architecture

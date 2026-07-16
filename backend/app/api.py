@@ -156,7 +156,8 @@ def snapshot(session_id: str):
 def session_stats(session_id: str) -> dict:
     session = manager.get(session_id)
     if session is not None:
-        return {"session": session.to_dict(), "stats": session.module.get_stats()}
+        stats = session.module.get_stats() if session.module else session.final_stats
+        return {"session": session.to_dict(), "stats": stats}
     row = database.get_session(session_id)
     if row is None:
         raise HTTPException(404, "Session not found")

@@ -26,6 +26,7 @@ class AnalysisSession:
         self.error: Optional[str] = None
         self.started_at = time.time()
         self.frames_processed = 0
+        self.final_stats: dict = {}
 
         # validate the (cheap) video source before loading (heavy) models
         self.video: VideoSource = create_source(source_type, source)
@@ -77,7 +78,14 @@ class AnalysisSession:
             self.error = str(exc)
         finally:
             self.video.release()
+            # keep the last stats, then release the module so model memory is
+            # freed as soon as the session ends (matters on low-RAM machines)
+            try:
+                self.final_stats = self.module.get_stats()
+            except Exception:  # noqa: BLE001
+                self.final_stats = {}
             self.module.close()
+            self.module = None
             database.set_session_status(self.id, self.status)
 
     def stop(self) -> None:
