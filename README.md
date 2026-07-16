@@ -11,11 +11,10 @@ dashboard, built to run on **CPU only** (no GPU required) and deploy for **free*
 | 🏃 **Idle Worker / Activity** | Tracks people via pose keypoints, flags anyone idle beyond a threshold | YOLOv8-pose |
 | 🚗 **License Plate Recognition (ANPR)** | Detects and reads vehicle plates, logs each unique plate with time | YOLO (custom) + EasyOCR |
 
-Every module accepts **three video sources**, chosen per analysis session:
+Every module accepts **two video sources**, chosen per analysis session:
 
 1. **Live IP camera** — any RTSP/HTTP stream URL
 2. **Uploaded recording** — MP4 / AVI / MOV / MKV / WebM
-3. **Bundled demo video** — for instant demos
 
 ---
 
@@ -97,7 +96,7 @@ backend/
   Dockerfile              multi-arch (x86_64 + ARM64/aarch64)
   requirements.txt        all deps ship aarch64 wheels — no paddle
 frontend/
-  app/                    Next.js App Router pages (wizard / session / history)
+  app/                    Next.js App Router pages (wizard / session / faces / attendance / history)
   components/             Nav, stats panels, custom SVG chart
   lib/api.js              API client + use-case colors/labels
 docker-compose.yml        local full-stack development
@@ -153,6 +152,7 @@ variables (see `backend/.env.example`). The important ones:
 | `CORS_ORIGINS` | `*` | **Set to your dashboard URL in production** (comma-separated) |
 | `FACE_THRESHOLD` | `0.4` | Cosine distance for a face match — lower = stricter |
 | `ATTENDANCE_GAP_MIN` | `5` | Minutes away before a person is logged as checked-in again |
+| `UNKNOWN_FACE_COOLDOWN_S` | `30` | Dedupe window for unknown-face events |
 | `PPE_VIOLATION_PREFIXES` | `no,without` | Class-name prefixes treated as violations |
 | `PPE_NEUTRAL_CLASSES` | `person` | Classes excluded from compliance math |
 | `PPE_CONFIDENCE` | `0.4` | Minimum detection confidence for PPE |
@@ -168,27 +168,42 @@ Frontend has exactly one variable: `NEXT_PUBLIC_API_URL` — the engine's base U
 
 ## 5. Using the system
 
-1. **Dashboard → New Analysis**: pick a use case → pick a source (demo / upload /
-   RTSP URL) → **Start analysis**.
+1. **Dashboard → New Analysis**: pick a use case → pick a source (upload / RTSP URL) →
+   **Start analysis**.
 2. Watch the live annotated feed. The right-hand panel is use-case specific:
    attendance log, compliance % and per-class counts, active/idle table, or vehicle log.
 3. **History** page: search and filter every event across all sessions, see the
    events-per-hour chart, **export CSV**.
 
-### Enrolling faces
+### Enrolling faces (People page)
 
-Each person = one folder of photos (more photos → better recognition):
+**Dashboard → People**: type the person's name, select several photos in one go
+(different angles → better recognition), click **Enroll person**. The photos are stored
+one-folder-per-person and the embeddings cache is **rebuilt automatically**, so the
+person is recognized in the next session — no manual steps:
 
 ```
 backend/faces_db/
-  Jane Doe/
+  Jane Doe/          ← the folder name is the label shown on recognition
     front.jpg
     side.jpg
 ```
 
-Then rebuild embeddings: `POST /api/faces/rebuild` (or restart and start a face session —
-the cache builds automatically on first use). Via API you can also upload:
-`POST /api/faces/{name}` with image files, and `DELETE /api/faces/{name}`.
+Anyone not enrolled is labeled **Unknown** and logged as an `unknown_face` event
+(deduped by `UNKNOWN_FACE_COOLDOWN_S`). The People page also lists every identity
+with photo counts, per-person delete, and a manual rebuild button.
+
+Equivalent API: `POST /api/faces/{name}` (multipart images; auto-rebuilds — pass
+`?rebuild=false` to skip), `DELETE /api/faces/{name}`, `POST /api/faces/rebuild`.
+On an engine without deepface/tensorflow, enrollment still saves photos and reports
+`rebuilt: false`; run the rebuild later on a full engine.
+
+### Attendance dashboard
+
+**Dashboard → Attendance**: cross-session attendance built from recognition events —
+per day: who was present, **arrival time** (first detection), last seen, check-in
+count; plus an **unknown-faces log** linking each detection to its session. Filter by
+**person** and **date range** (Today / Last 7 days / All time presets).
 
 ## 6. API reference
 
@@ -209,7 +224,8 @@ Interactive documentation at **`/docs`** (Swagger UI). Summary:
 | `GET /api/events` | search events: `session_id, use_case, type, q, hours, limit, offset` |
 | `GET /api/events/export` | CSV download (same filters) |
 | `GET /api/stats/summary?hours=24` | events-per-hour buckets for the chart |
-| `GET/POST/DELETE /api/faces…` | face enrollment (see §5) |
+| `GET/POST/DELETE /api/faces/{name}` · `POST /api/faces/rebuild` | face enrollment; enroll/delete auto-rebuild embeddings (see §5) |
+| `GET /api/attendance` | per-day attendance + unknown-face log: `person, date_from, date_to` (YYYY-MM-DD) |
 
 Events are stored in SQLite (`backend/data/visionguard.db`, WAL mode) with schema
 `events(session_id, use_case, type, label, confidence, ts, extra JSON)`.
@@ -317,15 +333,27 @@ Your production API base URL is now **`https://myvisionguard.duckdns.org`**.
 
 ## 8. Deployment — frontend on Vercel (free)
 
+> **Current live setup:** the dashboard is deployed at
+> **https://visionguard-eta.vercel.app** — Vercel project `visionguard`, connected to
+> the GitHub repo `Asad-Mhmood/Argus-AI` with **Root Directory = `frontend`**.
+> Every push to `main` auto-deploys production.
+
+### 8.1 One-time setup (from scratch)
+
 1. Push the repo to GitHub.
 2. [vercel.com](https://vercel.com) → **Add New… → Project** → import the repo.
-3. **Root Directory:** `frontend` — *this is the critical setting*; the framework
-   preset (Next.js) is then auto-detected.
-4. **Environment variable:**
+   (If the repo isn't listed: link GitHub under *Account Settings → Authentication →
+   Login Connections*, then install the **Vercel GitHub App** on the repo at
+   github.com/apps/vercel.)
+3. **Root Directory:** `frontend` — *this is the critical setting*: the repo root also
+   contains the backend, so builds fail without it. Set it under *Project Settings →
+   Build and Deployment → Root Directory*. The framework preset (Next.js) is then
+   auto-detected.
+4. **Environment variable** (baked in at build time — changing it needs a redeploy):
 
    | Name | Value |
    |---|---|
-   | `NEXT_PUBLIC_API_URL` | `https://myvisionguard.duckdns.org` |
+   | `NEXT_PUBLIC_API_URL` | `https://myvisionguard.duckdns.org` (your engine's HTTPS URL) |
 
 5. **Deploy.** You'll get `https://<project>.vercel.app`.
 6. **Close the CORS loop** — the backend must allow the dashboard's origin. On the VM:
@@ -340,15 +368,39 @@ Your production API base URL is now **`https://myvisionguard.duckdns.org`**.
 
 7. Open the dashboard — the nav bar should show **“Engine online.”**
 
-CLI alternative: `cd frontend && npx vercel --prod` (it will prompt for the env var).
+### 8.2 Deploying updates
+
+- **Automatic:** push to `main` → Vercel builds and promotes production
+  (~1 min; watch it on the project's *Deployments* tab).
+- **Manual (no git trigger needed):** `cd frontend && vercel deploy --prod`.
+  Always run it **from the `frontend` folder** — deploying from the repo root makes the
+  CLI detect "services" and generate a broken `vercel.json`.
+
+### 8.3 Quick public demo — no cloud VM needed
+
+The engine can run on any local machine and be exposed with a free Cloudflare quick
+tunnel; the Vercel dashboard connects to it per-browser:
+
+1. Run **`start_demo.bat`** (repo root). It opens two windows: the venv engine on
+   port 8000 and `cloudflared`, which prints a public URL like
+   `https://random-words.trycloudflare.com` (scroll to the top of that window).
+2. Open the Vercel dashboard → **⚙ Engine** (top right) → paste the tunnel URL →
+   **Save & reload**. This browser-local override beats the build-time
+   `NEXT_PUBLIC_API_URL`; *Reset to default* removes it.
+3. The tunnel URL **changes on every restart** — re-paste it each demo session.
+
+Tunnel traffic is HTTPS, so no mixed-content problem, and the backend's default
+`CORS_ORIGINS=*` accepts the Vercel origin.
 
 ### Deployment checklist
 
-- [ ] VM reachable: `curl http://<PUBLIC_IP>:8000/api/health`
-- [ ] HTTPS works: `https://<domain>/api/health` in a browser
-- [ ] Vercel env `NEXT_PUBLIC_API_URL` = the **https** domain (no trailing slash)
+- [ ] Engine reachable over **HTTPS**: `https://<domain>/api/health` in a browser
+      (Oracle path: also `curl http://<PUBLIC_IP>:8000/api/health` first)
+- [ ] Vercel Root Directory = `frontend`
+- [ ] Vercel env `NEXT_PUBLIC_API_URL` = the **https** engine URL (no trailing slash) —
+      or the tunnel URL pasted in ⚙ Engine for demos
 - [ ] Backend `CORS_ORIGINS` = the exact Vercel URL (scheme + host, no trailing slash)
-- [ ] Dashboard nav shows *Engine online*; a demo-video session streams live
+- [ ] Dashboard nav shows *Engine online*; an uploaded-video session streams live
 
 ---
 
@@ -368,9 +420,9 @@ docker run -d --name visionguard --restart unless-stopped \
 The named volume `visionguard_data` preserves the event database, uploads and face
 embeddings across updates.
 
-**Frontend**: just `git push` — Vercel redeploys automatically on every push to the
-production branch. Changing `NEXT_PUBLIC_API_URL` requires a **redeploy** (it's baked
-at build time).
+**Frontend**: just `git push` to `main` — the repo is connected to Vercel, so every push
+redeploys production automatically (manual fallback: `cd frontend && vercel deploy --prod`).
+Changing `NEXT_PUBLIC_API_URL` requires a **redeploy** (it's baked at build time).
 
 ## 10. Adding a new detection module
 

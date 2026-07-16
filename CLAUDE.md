@@ -15,7 +15,7 @@ There is no test suite.
 ## Commands
 
 ```bash
-# Backend (venv already exists at backend/.venv with all deps except tensorflow/deepface)
+# Backend (venv already exists at backend/.venv with all deps incl. tensorflow/deepface)
 cd backend
 .venv/Scripts/python -m uvicorn app.main:app --port 8000   # Windows paths
 
@@ -73,14 +73,28 @@ Module-specific semantics worth knowing:
 - **anpr** and **ppe** deduplicate events with cooldown windows (`PLATE_COOLDOWN_S`,
   `VIOLATION_COOLDOWN_S`) so the log isn't flooded.
 
-**Frontend**: three pages — `app/page.jsx` (use-case → source wizard), `app/session/[id]/page.jsx`
-(live MJPEG + per-use-case stats panels, polling every ~2.5s), `app/history/page.jsx`
-(filters + custom SVG stacked-bar chart + event table). Use-case colors are fixed slots in
-`app/globals.css` / `lib/api.js` — keep the assignment stable, it's a validated accessible palette.
+**Frontend**: five pages — `app/page.jsx` (use-case → source wizard; sources are upload + RTSP,
+the demo tab was removed), `app/session/[id]/page.jsx` (live MJPEG + per-use-case stats panels,
+polling every ~2.5s), `app/faces/page.jsx` (person enrollment), `app/attendance/page.jsx`
+(cross-session attendance dashboard), `app/history/page.jsx` (filters + custom SVG stacked-bar
+chart + event table). Use-case colors are fixed slots in `app/globals.css` / `lib/api.js` —
+keep the assignment stable, it's a validated accessible palette. The engine URL can be
+overridden per-browser via the ⚙ Engine panel (localStorage, beats `NEXT_PUBLIC_API_URL`).
 
 ## Deployment
 
-- Backend → Oracle Always Free ARM VM via Docker; needs `CORS_ORIGINS` set to the frontend URL,
-  and HTTPS (Caddy + DuckDNS) because a Vercel (https) frontend can't call a plain-http API.
-- Frontend → Vercel, Root Directory = `frontend`, env `NEXT_PUBLIC_API_URL`.
-- Full steps are in README.md §2–3.
+Current live setup (July 2026):
+
+- **Frontend** → Vercel project `visionguard` (team asadmayo42), live at
+  https://visionguard-eta.vercel.app. Connected to GitHub `Asad-Mhmood/Argus-AI`:
+  **push to `main` auto-deploys production**. Root Directory = `frontend` (set in project
+  settings — repo root also holds the backend, builds fail without it). Env:
+  `NEXT_PUBLIC_API_URL` (baked at build time). Manual deploy fallback:
+  `cd frontend && vercel deploy --prod` (the CLI is linked; never deploy from repo root —
+  CLI 55's service detection generates a broken vercel.json there).
+- **Backend for demos** → this machine via `start_demo.bat` (venv engine + Cloudflare quick
+  tunnel). The tunnel prints a fresh `https://*.trycloudflare.com` URL each start; paste it
+  into the dashboard's ⚙ Engine override.
+- **Backend production** → Oracle Always Free ARM VM via Docker; needs `CORS_ORIGINS` set to
+  the frontend URL, and HTTPS (Caddy + DuckDNS) because a Vercel (https) frontend can't call
+  a plain-http API. Full steps in README.md §7–8.
