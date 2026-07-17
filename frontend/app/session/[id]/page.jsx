@@ -222,28 +222,77 @@ function ActivityPanel({ stats }) {
 }
 
 function ANPRPanel({ stats }) {
+  const [zoneFilter, setZoneFilter] = useState("");
   const plates = stats.plates || [];
+  const pending = stats.pending || [];
+  const zones = stats.zones || [];
+  const shownPlates = zoneFilter ? plates.filter((p) => p.zone === zoneFilter) : plates;
+  const shownPending = zoneFilter ? pending.filter((p) => p.zone === zoneFilter) : pending;
   return (
     <>
       <div className="grid cols-2">
-        <Tile label="Unique plates" value={stats.unique_plates ?? 0} />
-        <Tile label="Last plate" value={plates[0]?.plate ?? "—"} />
+        <Tile label="Vehicles logged" value={stats.unique_plates ?? 0} />
+        <Tile
+          label="In view now"
+          value={stats.in_view ?? 0}
+          sub={pending.length > 0 ? `${pending.length} being read` : undefined}
+        />
       </div>
       <div className="card mt">
         <h3>Vehicle log</h3>
-        {plates.length === 0 ? (
+        {zones.length > 0 && (
+          <div className="filter-chips">
+            {["", ...zones].map((z) => (
+              <button
+                key={z || "all"}
+                type="button"
+                className={`chip-btn ${zoneFilter === z ? "active" : ""}`}
+                onClick={() => setZoneFilter(z)}
+              >
+                {z || "All zones"}
+              </button>
+            ))}
+          </div>
+        )}
+        {shownPlates.length === 0 && shownPending.length === 0 ? (
           <p className="empty">No plates read yet.</p>
         ) : (
           <div className="table-wrap">
             <table className="data">
-              <thead><tr><th>Plate</th><th>First seen</th><th>Last seen</th><th>Reads</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Plate</th>
+                  {zones.length > 0 && <th>Zone</th>}
+                  <th>First seen</th>
+                  <th>Confidence</th>
+                  <th>Reads</th>
+                </tr>
+              </thead>
               <tbody>
-                {plates.map((p) => (
-                  <tr key={p.plate}>
-                    <td><strong>{p.plate}</strong></td>
+                {shownPending.map((p, i) => (
+                  <tr key={`pending-${i}`} className="pending-row">
+                    <td>
+                      <strong>{p.plate ?? "· · ·"}</strong>{" "}
+                      <span className="muted">reading…</span>
+                    </td>
+                    {zones.length > 0 && <td>{p.zone && <span className="zone-tag">{p.zone}</span>}</td>}
                     <td className="num">{fmtTime(p.first_seen)}</td>
-                    <td className="num">{fmtTime(p.last_seen)}</td>
-                    <td className="num">{p.count}</td>
+                    <td className="num">—</td>
+                    <td className="num">{p.reads}</td>
+                  </tr>
+                ))}
+                {shownPlates.map((p, i) => (
+                  <tr key={`${p.plate}-${p.first_seen ?? i}`}>
+                    <td>
+                      <div className="plate-cell">
+                        {p.thumb && <img className="plate-thumb" src={p.thumb} alt="" />}
+                        <strong>{p.plate}</strong>
+                      </div>
+                    </td>
+                    {zones.length > 0 && <td>{p.zone && <span className="zone-tag">{p.zone}</span>}</td>}
+                    <td className="num">{fmtTime(p.first_seen)}</td>
+                    <td className="num">{p.confidence != null ? `${(p.confidence * 100).toFixed(0)}%` : "—"}</td>
+                    <td className="num">{p.reads ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -265,7 +314,10 @@ function EventList({ events }) {
             <tr key={e.id}>
               <td className="num muted">{fmtTime(e.ts)}</td>
               <td>{e.type.replaceAll("_", " ")}</td>
-              <td><strong>{e.label}</strong></td>
+              <td>
+                <strong>{e.label}</strong>
+                {e.extra?.zone && <span className="zone-tag">{e.extra.zone}</span>}
+              </td>
             </tr>
           ))}
         </tbody>

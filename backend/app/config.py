@@ -53,8 +53,18 @@ PPE_CONFIDENCE = float(os.getenv("PPE_CONFIDENCE", "0.4"))
 VIOLATION_COOLDOWN_S = float(os.getenv("VIOLATION_COOLDOWN_S", "10"))
 IDLE_SECONDS = float(os.getenv("IDLE_SECONDS", "10"))                 # stillness → idle
 MOVEMENT_THRESHOLD = float(os.getenv("MOVEMENT_THRESHOLD", "5.0"))    # px displacement
-PLATE_COOLDOWN_S = float(os.getenv("PLATE_COOLDOWN_S", "60"))         # dedupe same plate
+PLATE_COOLDOWN_S = float(os.getenv("PLATE_COOLDOWN_S", "60"))         # same plate = same visit within this window
 PLATE_MIN_CHARS = int(os.getenv("PLATE_MIN_CHARS", "3"))
+PLATE_MAX_CHARS = int(os.getenv("PLATE_MAX_CHARS", "10"))              # reject longer (garbage) reads
+PLATE_OCR_MIN_CONF = float(os.getenv("PLATE_OCR_MIN_CONF", "0.3"))     # drop OCR fragments below this
+PLATE_OCR_UPSCALE_W = int(os.getenv("PLATE_OCR_UPSCALE_W", "120"))     # 2x-upscale narrower crops before OCR
+PLATE_MATCH_RATIO = float(os.getenv("PLATE_MATCH_RATIO", "0.6"))       # text similarity to treat reads as one plate
+PLATE_TRACK_MAX_DIST = float(os.getenv("PLATE_TRACK_MAX_DIST", "0.2")) # spatial match limit (fraction of frame width)
+PLATE_TRACK_TTL_S = float(os.getenv("PLATE_TRACK_TTL_S", "3"))         # unseen for this long = visit over, log it
+PLATE_CONFIRM_READS = int(os.getenv("PLATE_CONFIRM_READS", "2"))       # reads needed to log a still-present vehicle
+PLATE_SINGLE_READ_CONF = float(os.getenv("PLATE_SINGLE_READ_CONF", "0.5"))  # lone unconfirmed read needs this conf
+PLATE_LOG_MAX_WAIT_S = float(os.getenv("PLATE_LOG_MAX_WAIT_S", "10"))  # log a still-present vehicle after this long
+PLATE_THUMB_W = int(os.getenv("PLATE_THUMB_W", "160"))                 # plate thumbnail width (px) stored on events
 OCR_LANGS = [l.strip() for l in os.getenv("OCR_LANGS", "en").split(",") if l.strip()]
 
 # --- API ---

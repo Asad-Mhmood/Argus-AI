@@ -22,10 +22,25 @@ VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
+class Zone(BaseModel):
+    """Detection zone, normalized to the frame (0..1)."""
+    label: str
+    x: float
+    y: float
+    w: float
+    h: float
+
+
 class SessionRequest(BaseModel):
     use_case: str
     source_type: str  # rtsp | upload | demo
     source: str       # RTSP URL, uploaded file name, or demo file name
+    zones: Optional[list[Zone]] = None  # restrict detection to these areas
+
+
+class PreviewRequest(BaseModel):
+    source_type: str
+    source: str
 
 
 def _safe_name(name: str) -> str:
@@ -89,10 +104,34 @@ def list_uploads() -> list[dict]:
 
 # ---------- sessions ----------
 
+@router.post("/preview")
+def preview_frame(req: PreviewRequest):
+    """One frame of a source as JPEG — used to draw detection zones before starting."""
+    from .core.video_source import create_source
+
+    try:
+        src = create_source(req.source_type, req.source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    try:
+        frame = src.read()
+    finally:
+        src.release()
+    if frame is None:
+        raise HTTPException(400, "Source produced no frames")
+    import cv2
+
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, config.JPEG_QUALITY])
+    if not ok:
+        raise HTTPException(500, "Could not encode preview frame")
+    return StreamingResponse(io.BytesIO(buf.tobytes()), media_type="image/jpeg")
+
+
 @router.post("/sessions")
 def create_session(req: SessionRequest) -> dict:
+    zones = [z.model_dump() for z in req.zones] if req.zones else None
     try:
-        session = manager.create(req.use_case, req.source_type, req.source)
+        session = manager.create(req.use_case, req.source_type, req.source, zones)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(400, str(exc)) from exc
     except ImportError as exc:
@@ -166,6 +205,13 @@ def session_stats(session_id: str) -> dict:
         stats = {
             "people": database.attendance_log(session_id),
             "unknown_detections": database.count_events(session_id, "unknown_face"),
+        }
+    elif row["use_case"] == "anpr":
+        plates = database.plate_log(session_id)
+        stats = {
+            "unique_plates": len(plates),
+            "plates": plates,
+            "zones": sorted({p["zone"] for p in plates if p.get("zone")}),
         }
     return {"session": row, "stats": stats}
 

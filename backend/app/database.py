@@ -179,6 +179,30 @@ def attendance_log(session_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def plate_log(session_id: str) -> list[dict]:
+    """Logged plate visits for one session — same shape as the ANPR module's
+    live stats, so the dashboard renders ended sessions identically."""
+    with _lock:
+        rows = _db().execute(
+            "SELECT label, confidence, ts, extra FROM events "
+            "WHERE session_id=? AND type='plate_detected' ORDER BY ts DESC",
+            (session_id,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        extra = json.loads(r["extra"]) if r["extra"] else {}
+        out.append({
+            "plate": r["label"],
+            "zone": extra.get("zone"),
+            "first_seen": extra.get("first_seen", r["ts"]),
+            "last_seen": extra.get("last_seen", r["ts"]),
+            "reads": extra.get("reads"),
+            "confidence": r["confidence"],
+            "thumb": extra.get("thumb"),
+        })
+    return out
+
+
 def count_events(session_id: str, event_type: str) -> int:
     with _lock:
         row = _db().execute(

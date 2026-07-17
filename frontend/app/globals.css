@@ -263,3 +263,47 @@ table.data tr:last-child td { border-bottom: none; }
 .mt { margin-top: 16px; }
 .muted { color: var(--muted); font-size: 12px; }
 .error-text { color: var(--critical); font-size: 13px; }
+
+/* ---- ANPR: zone editor + plate table ---- */
+.zone-editor { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.zone-canvas {
+  position: relative; width: 100%; max-width: 640px;
+  user-select: none; cursor: crosshair;
+  border-radius: 8px; overflow: hidden; border: 1px solid var(--border);
+}
+.zone-canvas img { width: 100%; display: block; pointer-events: none; }
+.zone-box {
+  position: absolute; border: 2px solid var(--zc, var(--accent));
+  background: color-mix(in srgb, var(--zc, var(--accent)) 16%, transparent);
+  border-radius: 2px; pointer-events: none;
+}
+.zone-box .tag {
+  position: absolute; top: 0; left: 0;
+  background: var(--zc, var(--accent)); color: #fff;
+  font-size: 11px; font-weight: 600; padding: 1px 7px;
+  border-bottom-right-radius: 6px; white-space: nowrap;
+}
+.zone-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; max-width: 380px; }
+.zone-row { display: flex; gap: 8px; align-items: center; }
+.zone-row .chip { flex: none; }
+.zone-row .input { flex: 1; min-width: 0; }
+.input.sm { padding: 5px 9px; font-size: 13px; }
+
+.zone-tag {
+  display: inline-block; margin-left: 7px; padding: 0 8px;
+  border: 1px solid var(--border); border-radius: 999px;
+  font-size: 11px; font-weight: 600; color: var(--ink-2);
+  vertical-align: middle;
+}
+.filter-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.chip-btn {
+  padding: 3px 11px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: none;
+  font-size: 12px; font-weight: 500; color: var(--ink-2);
+}
+.chip-btn:hover { color: var(--ink); }
+.chip-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+.plate-cell { display: flex; align-items: center; gap: 8px; }
+.plate-thumb { height: 26px; border-radius: 4px; border: 1px solid var(--border); display: block; }
+.pending-row td { opacity: 0.65; }

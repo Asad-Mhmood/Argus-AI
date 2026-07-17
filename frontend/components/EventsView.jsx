@@ -113,7 +113,10 @@ export default function EventsView({ useCase: lockedUseCase }) {
                       </td>
                     )}
                     <td>{e.type.replaceAll("_", " ")}</td>
-                    <td><strong>{e.label}</strong></td>
+                    <td>
+                      <strong>{e.label}</strong>
+                      {e.extra?.zone && <span className="zone-tag">{e.extra.zone}</span>}
+                    </td>
                     <td className="num">{e.confidence != null ? `${(e.confidence * 100).toFixed(0)}%` : "—"}</td>
                   </tr>
                 ))}

@@ -29,6 +29,14 @@ class BaseModule(ABC):
     def get_stats(self) -> dict:
         """Live, use-case-specific stats for the dashboard side panel."""
 
+    def configure(self, options: dict) -> None:
+        """Apply per-session options (e.g. detection zones). Optional."""
+
+    def flush(self) -> list[dict]:
+        """Events to persist when the session ends (optional) — e.g. detections
+        that were still being accumulated when the video ran out."""
+        return []
+
     def close(self) -> None:
         """Release any resources (optional)."""
 

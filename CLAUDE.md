@@ -70,8 +70,20 @@ Module-specific semantics worth knowing:
   `unknown_face` events deduped by `UNKNOWN_FACE_COOLDOWN_S`. Cross-session dashboard data
   comes from `GET /api/attendance` (person + date filters); frontend pages: `/faces`
   (enrollment) and `/attendance` (dashboard).
-- **anpr** and **ppe** deduplicate events with cooldown windows (`PLATE_COOLDOWN_S`,
-  `VIOLATION_COOLDOWN_S`) so the log isn't flooded.
+- **anpr**: logs **one event per vehicle visit**, not per read. Detections are grouped
+  into tracks by fuzzy plate-text similarity (partial reads like "ABC12" fold into
+  "ABC123"; contradicting text forces a new track even at the same spot) with spatial
+  matching as fallback; the best-supported read wins and the event carries
+  `extra: {zone, first_seen, last_seen, reads, thumb}` (thumb = small data-URI JPEG of
+  the winning read's crop). A visit is logged when the track expires
+  (`PLATE_TRACK_TTL_S`), when a vehicle lingers (`PLATE_LOG_MAX_WAIT_S`), or at session
+  end via `BaseModule.flush()`; lone low-confidence reads are rejected
+  (`PLATE_SINGLE_READ_CONF`), re-appearances within `PLATE_COOLDOWN_S` are merged.
+  Optional **detection zones** (normalized labeled rects, drawn in the UI on a
+  `POST /api/preview` frame, passed via the session-create `zones` field) restrict
+  detection and tag every event with its zone.
+- **ppe** deduplicates events with a cooldown window (`VIOLATION_COOLDOWN_S`) so the
+  log isn't flooded.
 
 **Frontend**: five pages — `app/page.jsx` (use-case → source wizard; sources are upload + RTSP,
 the demo tab was removed), `app/session/[id]/page.jsx` (live MJPEG + per-use-case stats panels,

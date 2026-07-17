@@ -43,6 +43,9 @@ export const USE_CASE_COLORS = {
   anpr: "var(--uc-anpr)",
 };
 
+/** Zone overlay colors — same order as the engine draws them on the stream. */
+export const ZONE_COLORS = ["#28a0e6", "#e6b43c", "#e65aaa", "#78c850"];
+
 export const USE_CASE_LABELS = {
   face_attendance: "Attendance",
   ppe: "PPE Safety",

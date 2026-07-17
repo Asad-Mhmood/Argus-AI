@@ -17,11 +17,13 @@ log = logging.getLogger("visionguard.session")
 
 
 class AnalysisSession:
-    def __init__(self, use_case: str, source_type: str, source: str):
+    def __init__(self, use_case: str, source_type: str, source: str,
+                 zones: Optional[list[dict]] = None):
         self.id = uuid.uuid4().hex[:12]
         self.use_case = use_case
         self.source_type = source_type
         self.source_desc = source
+        self.zones = zones or []
         self.status = "starting"
         self.error: Optional[str] = None
         self.started_at = time.time()
@@ -32,6 +34,7 @@ class AnalysisSession:
         self.video: VideoSource = create_source(source_type, source)
         try:
             self.module = create_module(use_case)
+            self.module.configure({"zones": self.zones})
         except Exception:
             self.video.release()
             raise
@@ -78,6 +81,14 @@ class AnalysisSession:
             self.error = str(exc)
         finally:
             self.video.release()
+            # persist detections the module was still accumulating (e.g. plate
+            # visits that hadn't ended when the video ran out)
+            try:
+                leftover = self.module.flush()
+                if leftover:
+                    database.insert_events(self.id, self.use_case, leftover)
+            except Exception:  # noqa: BLE001
+                log.exception("Session %s flush failed", self.id)
             # keep the last stats, then release the module so model memory is
             # freed as soon as the session ends (matters on low-RAM machines)
             try:
@@ -135,7 +146,8 @@ class SessionManager:
         self._sessions: dict[str, AnalysisSession] = {}
         self._lock = threading.Lock()
 
-    def create(self, use_case: str, source_type: str, source: str) -> AnalysisSession:
+    def create(self, use_case: str, source_type: str, source: str,
+               zones: Optional[list[dict]] = None) -> AnalysisSession:
         with self._lock:
             active = sum(1 for s in self._sessions.values() if s.is_active)
             if active >= config.MAX_CONCURRENT_SESSIONS:
@@ -143,7 +155,7 @@ class SessionManager:
                     f"Maximum of {config.MAX_CONCURRENT_SESSIONS} concurrent sessions reached. "
                     "Stop a running session first."
                 )
-            session = AnalysisSession(use_case, source_type, source)
+            session = AnalysisSession(use_case, source_type, source, zones)
             self._sessions[session.id] = session
         session.start()
         return session
