@@ -9,7 +9,7 @@ dashboard, built to run on **CPU only** (no GPU required) and deploy for **free*
 | 🧑 **Face Recognition / Attendance** | Recognizes enrolled faces, keeps an attendance log with in/out times | YOLOv12-face + ArcFace (DeepFace) |
 | 🦺 **PPE / Safety Compliance** | Detects safety-gear violations (no helmet, no gloves, …), tracks a live compliance rate | YOLO11 (custom HSE) |
 | 🏃 **Idle Worker / Activity** | Tracks people via pose keypoints, flags anyone idle beyond a threshold | YOLOv8-pose |
-| 🚗 **License Plate Recognition (ANPR)** | Detects and reads vehicle plates, logs each unique plate with time | YOLO (custom) + EasyOCR |
+| 🚗 **License Plate Recognition (ANPR)** | Reads vehicle plates and logs **one event per vehicle visit** (best read wins, plate thumbnail included), with optional user-drawn **detection zones** (e.g. Entry / Exit) | YOLO (custom) + EasyOCR |
 
 Every module accepts **two video sources**, chosen per analysis session:
 
@@ -96,9 +96,9 @@ backend/
   Dockerfile              multi-arch (x86_64 + ARM64/aarch64)
   requirements.txt        all deps ship aarch64 wheels — no paddle
 frontend/
-  app/                    Next.js App Router pages (wizard / session / faces / attendance / history)
-  components/             Nav, stats panels, custom SVG chart
-  lib/api.js              API client + use-case colors/labels
+  app/                    Next.js App Router pages (modules / session / faces / attendance / history / status)
+  components/             Nav, module workspace views, start-analysis wizard + zone editor, custom SVG chart
+  lib/api.js              API client + use-case catalog/colors/labels
 docker-compose.yml        local full-stack development
 legacy/                   original prototype scripts (reference only)
 ```
@@ -159,8 +159,18 @@ variables (see `backend/.env.example`). The important ones:
 | `VIOLATION_COOLDOWN_S` | `10` | Dedupe window per violation class |
 | `IDLE_SECONDS` | `10` | Stillness duration before a worker counts as idle |
 | `MOVEMENT_THRESHOLD` | `5.0` | Pixel displacement below which a person is "still" |
-| `PLATE_COOLDOWN_S` | `60` | Dedupe window for re-reads of the same plate |
 | `OCR_LANGS` | `en` | EasyOCR language codes |
+| `PLATE_COOLDOWN_S` | `60` | Same plate seen again within this window = same visit, not re-logged |
+| `PLATE_MIN_CHARS` / `PLATE_MAX_CHARS` | `3` / `10` | Reads outside this length are rejected as garbage |
+| `PLATE_OCR_MIN_CONF` | `0.3` | OCR fragments below this confidence are dropped |
+| `PLATE_OCR_UPSCALE_W` | `120` | Plate crops narrower than this are 2×-upscaled before OCR |
+| `PLATE_MATCH_RATIO` | `0.6` | Text similarity for two reads to count as the same plate |
+| `PLATE_TRACK_MAX_DIST` | `0.2` | Spatial track-match limit (fraction of frame width) |
+| `PLATE_TRACK_TTL_S` | `3` | Plate unseen for this long → visit over, event logged |
+| `PLATE_CONFIRM_READS` | `2` | Reads needed before logging a vehicle that stays in view |
+| `PLATE_LOG_MAX_WAIT_S` | `10` | A vehicle still in view after this long gets logged anyway |
+| `PLATE_SINGLE_READ_CONF` | `0.5` | A visit backed by a single read needs at least this confidence |
+| `PLATE_THUMB_W` | `160` | Width (px) of the plate thumbnail stored with each event |
 | `MODELS_DIR` / `DATA_DIR` / `DEMO_DIR` / `FACES_DIR` | baked paths | Only override for custom layouts |
 
 Frontend has exactly one variable: `NEXT_PUBLIC_API_URL` — the engine's base URL
@@ -205,6 +215,28 @@ per day: who was present, **arrival time** (first detection), last seen, check-i
 count; plus an **unknown-faces log** linking each detection to its session. Filter by
 **person** and **date range** (Today / Last 7 days / All time presets).
 
+### License plates (ANPR module)
+
+**One event per vehicle visit, not per read.** The module tracks each vehicle across
+frames and accumulates OCR reads as votes: partial reads merge into fuller ones
+("ABC12" folds into "ABC123"), fuzzy-similar reads support the same candidate, and
+obviously bad reads (too short/long, low confidence) are rejected. The event is logged
+when the vehicle leaves view (or lingers past `PLATE_LOG_MAX_WAIT_S`), carrying the
+**best-supported reading**, the **detection zone**, first/last-seen times and a small
+**plate thumbnail**. A plate re-appearing within `PLATE_COOLDOWN_S` is treated as the
+same visit.
+
+**Detection zones (optional).** When starting an ANPR analysis, click
+**Load preview & draw zones**, then **drag rectangles directly on the preview frame**
+— e.g. one zone over the entry lane, one over the exit — and name each one. Plates
+outside your zones are ignored; every event records the zone it was detected in, and
+the session's vehicle log can be filtered per zone. Draw nothing to analyse the whole
+frame.
+
+The session page shows the live vehicle log (thumbnail, plate, zone, first seen,
+confidence, read count) plus vehicles currently being read; the same table remains
+available after the session ends.
+
 ## 6. API reference
 
 Interactive documentation at **`/docs`** (Swagger UI). Summary:
@@ -215,7 +247,8 @@ Interactive documentation at **`/docs`** (Swagger UI). Summary:
 | `GET /api/usecases` | the four modules with titles/descriptions |
 | `GET /api/demos` · `GET /api/videos` | list demo clips / uploaded videos |
 | `POST /api/videos` | upload a recording (multipart `file`) |
-| `POST /api/sessions` | start an analysis: `{use_case, source_type: rtsp\|upload\|demo, source}` |
+| `POST /api/preview` | one frame of a source as JPEG (for drawing zones): `{source_type, source}` |
+| `POST /api/sessions` | start an analysis: `{use_case, source_type: rtsp\|upload\|demo, source, zones?}` — `zones` is an optional list of `{label, x, y, w, h}` rects normalized to 0–1 (ANPR) |
 | `GET /api/sessions` | running + recent sessions |
 | `GET /api/sessions/{id}` · `POST /api/sessions/{id}/stop` | inspect / stop |
 | `GET /api/sessions/{id}/stream` | **live annotated MJPEG** (`multipart/x-mixed-replace`) |
