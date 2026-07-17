@@ -83,7 +83,7 @@ backend/
     config.py             every setting, env-overridable — the single source of config
     database.py           thread-safe SQLite store (sessions + events tables)
     core/
-      video_source.py     RTSPSource (frame-dropping) / FileSource (frame-skipping) / BrowserSource (frames pushed by the viewer's browser)
+      video_source.py     RTSPSource (frame-dropping) / FileSource (frame-skipping)
       session_manager.py  AnalysisSession threads, MJPEG generator, concurrency cap
     modules/
       __init__.py         module registry (use-case key → class + title)
@@ -179,8 +179,7 @@ Frontend has exactly one variable: `NEXT_PUBLIC_API_URL` — the engine's base U
 
 ## 5. Using the system
 
-1. **Dashboard → New Analysis**: pick a use case → pick a source (upload / **Use my
-   camera** — streams your own phone/laptop camera to the engine, no setup / RTSP URL) →
+1. **Dashboard → New Analysis**: pick a use case → pick a source (upload / RTSP URL) →
    **Start analysis**.
 2. Watch the live annotated feed. The right-hand panel is use-case specific:
    attendance log, compliance % and per-class counts, active/idle table, or vehicle log.
@@ -250,8 +249,7 @@ Interactive documentation at **`/docs`** (Swagger UI). Summary:
 | `GET /api/demos` · `GET /api/videos` | list demo clips / uploaded videos |
 | `POST /api/videos` | upload a recording (multipart `file`) |
 | `POST /api/preview` | one frame of a source as JPEG (for drawing zones): `{source_type, source}` |
-| `POST /api/sessions` | start an analysis: `{use_case, source_type: rtsp\|upload\|demo\|browser, source, zones?}` — `zones` is an optional list of `{label, x, y, w, h}` rects normalized to 0–1 (ANPR) |
-| `POST /api/sessions/{id}/frames` | push one camera frame (JPEG request body) into a `browser` session — used by the dashboard's “Use my camera” source; the session ends after `BROWSER_FRAME_TIMEOUT_S` without frames |
+| `POST /api/sessions` | start an analysis: `{use_case, source_type: rtsp\|upload\|demo, source, zones?}` — `zones` is an optional list of `{label, x, y, w, h}` rects normalized to 0–1 (ANPR) |
 | `GET /api/sessions` | running + recent sessions |
 | `GET /api/sessions/{id}` · `POST /api/sessions/{id}/stop` | inspect / stop |
 | `GET /api/sessions/{id}/stream` | **live annotated MJPEG** (`multipart/x-mixed-replace`) |
@@ -283,12 +281,10 @@ Two free options:
 (Hugging Face Spaces used to be the free no-card option, but since 2026 Docker
 Spaces require a PRO subscription for new accounts.)
 
-> **Reality check for live cameras:** a cloud engine can only *pull* RTSP from
-> cameras reachable *from the internet* (public IP / DDNS / VPN). Anyone can still
-> test live with the dashboard's **“Use my camera”** source — the browser pushes
-> phone/laptop camera frames to the engine, which works behind any NAT. For
-> cameras on a private site LAN, run this same Docker image on any on-site PC
-> instead — the dashboard works identically, just point `NEXT_PUBLIC_API_URL` at it.
+> **Reality check for live cameras:** a cloud engine can only reach cameras that
+> are reachable *from the internet* (public IP / DDNS / VPN). For cameras on a
+> private site LAN, run this same Docker image on any on-site PC instead — the
+> dashboard works identically, just point `NEXT_PUBLIC_API_URL` at it.
 
 ### 7.1 Option A — Modal (free, no card)
 

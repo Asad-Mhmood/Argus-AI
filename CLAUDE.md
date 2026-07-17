@@ -52,11 +52,10 @@ then runs a daemon thread that:
 
 **Video sources** (`app/core/video_source.py`): `RTSPSource` runs a grab thread keeping only
 the newest frame (so slow inference never lags a live stream); `FileSource` skips frames to
-match the analysis rate; `BrowserSource` (source_type `browser`) holds frames pushed by the
-viewer's browser via `POST /api/sessions/{id}/frames` (JPEG body) and ends the session after
-`BROWSER_FRAME_TIMEOUT_S` without a frame — this is the "Use my camera" dashboard source that
-lets anyone test live from a phone/laptop behind NAT. All downscale to `MAX_FRAME_WIDTH`.
-File names are traversal-guarded.
+match the analysis rate. Both downscale to `MAX_FRAME_WIDTH`. File names are traversal-guarded.
+(A `BrowserSource` "Use my camera" feature existed briefly — removed at the owner's request,
+recoverable from commit `7ee52a2`; don't re-add it unasked. Consequence: live testing against
+the cloud engine needs an internet-reachable RTSP camera.)
 
 **Detection modules** (`app/modules/`): one file per use case, registered in
 `app/modules/__init__.py` (`_REGISTRY`), all implementing `BaseModule`
@@ -89,9 +88,8 @@ Module-specific semantics worth knowing:
 - **ppe** deduplicates events with a cooldown window (`VIOLATION_COOLDOWN_S`) so the
   log isn't flooded.
 
-**Frontend**: five pages — `app/page.jsx` (use-case → source wizard; sources are upload +
-browser camera + RTSP, the demo tab was removed; browser-camera sessions stream frames from
-the session page's `CameraSender`), `app/session/[id]/page.jsx` (live MJPEG + per-use-case stats panels,
+**Frontend**: five pages — `app/page.jsx` (use-case → source wizard; sources are upload + RTSP,
+the demo tab was removed), `app/session/[id]/page.jsx` (live MJPEG + per-use-case stats panels,
 polling every ~2.5s), `app/faces/page.jsx` (person enrollment), `app/attendance/page.jsx`
 (cross-session attendance dashboard), `app/history/page.jsx` (filters + custom SVG stacked-bar
 chart + event table). Use-case colors are fixed slots in `app/globals.css` / `lib/api.js` —
