@@ -106,20 +106,23 @@ Current live setup (July 2026):
   https://visionguard-eta.vercel.app. Connected to GitHub `Asad-Mhmood/Argus-AI`:
   **push to `main` auto-deploys production**. Root Directory = `frontend` (set in project
   settings — repo root also holds the backend, builds fail without it). Env:
-  `NEXT_PUBLIC_API_URL` (baked at build time). Manual deploy fallback:
-  `cd frontend && vercel deploy --prod` (the CLI is linked; never deploy from repo root —
-  CLI 55's service detection generates a broken vercel.json there).
-- **Backend free cloud option** → Modal serverless container ($30/mo free credits, no card;
-  HF Spaces is NOT an option — Docker Spaces went PRO-only for new accounts in 2026).
-  Defined in `backend/modal_app.py`; deploy with `deploy_modal.bat` from the repo root
-  (`modal` is installed in `backend/.venv`; one-time `deploy_modal.bat setup` to log in).
-  Engine URL: `https://<workspace>--visionguard.modal.run`. Scales to zero when idle
-  (~30–60 s cold start); faces/uploads/embeddings persist on a Volume, the SQLite DB is
-  local-disk with a per-minute Volume backup. `max_containers=1` is load-bearing —
-  sessions are in-memory. README §7.1.
-- **Backend for demos** → this machine via `start_demo.bat` (venv engine + Cloudflare quick
-  tunnel). The tunnel prints a fresh `https://*.trycloudflare.com` URL each start; paste it
-  into the dashboard's ⚙ Engine override.
-- **Backend production** → Oracle Always Free ARM VM via Docker; needs `CORS_ORIGINS` set to
-  the frontend URL, and HTTPS (Caddy + DuckDNS) because a Vercel (https) frontend can't call
-  a plain-http API. Full steps in README.md §7–8.
+  `NEXT_PUBLIC_API_URL=https://asadmayo42--visionguard.modal.run` (baked at build time —
+  changing it needs a redeploy). Manual deploy fallback: `cd frontend && vercel deploy --prod`
+  (the CLI is linked; never deploy from repo root — CLI 55's service detection generates a
+  broken vercel.json there).
+- **Backend** → Modal serverless container, live at
+  https://asadmayo42--visionguard.modal.run (workspace `asadmayo42`, app `visionguard`).
+  Free Starter plan: $30/mo credits, no card (HF Spaces is NOT an option — Docker Spaces
+  went PRO-only for new accounts in 2026). Defined in `backend/modal_app.py`; deploy with
+  `deploy_modal.bat` from the repo root (`modal` is installed in `backend/.venv`; this
+  machine is already logged in — new machines run `deploy_modal.bat setup` once). Scales
+  to zero when idle (~10–30 s cold start); faces/uploads/embeddings persist on Volume
+  `visionguard-data`, the SQLite DB is local-disk with a per-minute Volume backup.
+  `max_containers=1` is load-bearing — sessions are in-memory. README §7.1.
+- **Backend fallback for local demos** → this machine via `start_demo.bat` (venv engine +
+  Cloudflare quick tunnel). The tunnel prints a fresh `https://*.trycloudflare.com` URL each
+  start; paste it into the dashboard's ⚙ Engine override (and *Reset to default* afterwards,
+  or the override keeps beating the Modal URL).
+- **Backend alternative for 24/7 production** → Oracle Always Free ARM VM via Docker (needs
+  a card for signup); `CORS_ORIGINS` set to the frontend URL + HTTPS via Caddy + DuckDNS.
+  Full steps in README.md §7.2.

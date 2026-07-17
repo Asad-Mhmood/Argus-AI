@@ -292,6 +292,11 @@ Spaces require a PRO subscription for new accounts.)
 
 ### 7.1 Option A — Modal (free, no card)
 
+> **Current live setup:** the engine is deployed at
+> **https://asadmayo42--visionguard.modal.run** (Modal workspace `asadmayo42`,
+> app `visionguard`), and the Vercel frontend points at it via
+> `NEXT_PUBLIC_API_URL`. Update it any time with `deploy_modal.bat`.
+
 [Modal](https://modal.com) runs the engine as a serverless container:
 **$30 of compute credits every month on the free Starter plan, no card**,
 sign-in via GitHub or Google. The engine sleeps when nobody uses it (credits
@@ -435,10 +440,11 @@ Your production API base URL is now **`https://myvisionguard.duckdns.org`**.
 
    | Name | Value |
    |---|---|
-   | `NEXT_PUBLIC_API_URL` | `https://myvisionguard.duckdns.org` (your engine's HTTPS URL) |
+   | `NEXT_PUBLIC_API_URL` | your engine's HTTPS URL, e.g. `https://asadmayo42--visionguard.modal.run` |
 
 5. **Deploy.** You'll get `https://<project>.vercel.app`.
-6. **Close the CORS loop** — the backend must allow the dashboard's origin. On the VM:
+6. **Close the CORS loop** — the backend must allow the dashboard's origin.
+   (Modal engine: nothing to do — it ships with the default `CORS_ORIGINS=*`.) On a VM:
 
    ```bash
    docker rm -f visionguard
