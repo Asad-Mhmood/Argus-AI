@@ -26,7 +26,7 @@ Every module accepts **two video sources**, chosen per analysis session:
 4. [Configuration reference](#4-configuration-reference)
 5. [Using the system](#5-using-the-system)
 6. [API reference](#6-api-reference)
-7. [Deployment — backend on Oracle Cloud (free)](#7-deployment--backend-on-oracle-cloud-free)
+7. [Deployment — backend in the cloud (free)](#7-deployment--backend-in-the-cloud-free)
 8. [Deployment — frontend on Vercel (free)](#8-deployment--frontend-on-vercel-free)
 9. [Updating a deployed system](#9-updating-a-deployed-system)
 10. [Adding a new detection module](#10-adding-a-new-detection-module)
@@ -83,7 +83,7 @@ backend/
     config.py             every setting, env-overridable — the single source of config
     database.py           thread-safe SQLite store (sessions + events tables)
     core/
-      video_source.py     RTSPSource (frame-dropping) / FileSource (frame-skipping)
+      video_source.py     RTSPSource (frame-dropping) / FileSource (frame-skipping) / BrowserSource (frames pushed by the viewer's browser)
       session_manager.py  AnalysisSession threads, MJPEG generator, concurrency cap
     modules/
       __init__.py         module registry (use-case key → class + title)
@@ -100,6 +100,7 @@ frontend/
   components/             Nav, module workspace views, start-analysis wizard + zone editor, custom SVG chart
   lib/api.js              API client + use-case catalog/colors/labels
 docker-compose.yml        local full-stack development
+deploy_modal.bat          one-command backend deploy to Modal (definition: backend/modal_app.py)
 legacy/                   original prototype scripts (reference only)
 ```
 
@@ -178,7 +179,8 @@ Frontend has exactly one variable: `NEXT_PUBLIC_API_URL` — the engine's base U
 
 ## 5. Using the system
 
-1. **Dashboard → New Analysis**: pick a use case → pick a source (upload / RTSP URL) →
+1. **Dashboard → New Analysis**: pick a use case → pick a source (upload / **Use my
+   camera** — streams your own phone/laptop camera to the engine, no setup / RTSP URL) →
    **Start analysis**.
 2. Watch the live annotated feed. The right-hand panel is use-case specific:
    attendance log, compliance % and per-class counts, active/idle table, or vehicle log.
@@ -248,7 +250,8 @@ Interactive documentation at **`/docs`** (Swagger UI). Summary:
 | `GET /api/demos` · `GET /api/videos` | list demo clips / uploaded videos |
 | `POST /api/videos` | upload a recording (multipart `file`) |
 | `POST /api/preview` | one frame of a source as JPEG (for drawing zones): `{source_type, source}` |
-| `POST /api/sessions` | start an analysis: `{use_case, source_type: rtsp\|upload\|demo, source, zones?}` — `zones` is an optional list of `{label, x, y, w, h}` rects normalized to 0–1 (ANPR) |
+| `POST /api/sessions` | start an analysis: `{use_case, source_type: rtsp\|upload\|demo\|browser, source, zones?}` — `zones` is an optional list of `{label, x, y, w, h}` rects normalized to 0–1 (ANPR) |
+| `POST /api/sessions/{id}/frames` | push one camera frame (JPEG request body) into a `browser` session — used by the dashboard's “Use my camera” source; the session ends after `BROWSER_FRAME_TIMEOUT_S` without frames |
 | `GET /api/sessions` | running + recent sessions |
 | `GET /api/sessions/{id}` · `POST /api/sessions/{id}/stop` | inspect / stop |
 | `GET /api/sessions/{id}/stream` | **live annotated MJPEG** (`multipart/x-mixed-replace`) |
@@ -265,19 +268,65 @@ Events are stored in SQLite (`backend/data/visionguard.db`, WAL mode) with schem
 
 ---
 
-## 7. Deployment — backend on Oracle Cloud (free)
+## 7. Deployment — backend in the cloud (free)
 
-The engine fits in Oracle's **Always Free** tier: an Ampere A1 VM with up to
-**4 OCPUs / 24 GB RAM (ARM64)** — permanently free, and plenty for this workload.
-All Python dependencies ship aarch64 wheels (this is why the project uses EasyOCR
-instead of PaddleOCR).
+Two free options:
 
-> **Reality check for live cameras:** a cloud VM can only reach cameras that are
-> reachable *from the internet* (public IP / DDNS / VPN). For cameras on a private
-> site LAN, run this same Docker image on any on-site PC instead — the dashboard
-> works identically, just point `NEXT_PUBLIC_API_URL` at it.
+| | Option A — Modal | Option B — Oracle Cloud VM |
+|---|---|---|
+| Cost | **$30/month free credits, no card ever** | free, card needed for identity check |
+| Hardware | 2 vCPU / 8 GB, sleeps when idle | up to 4 OCPU / 24 GB RAM (ARM64), always on |
+| HTTPS | built in | DIY (DuckDNS + Caddy) |
+| Storage | persistent Volume (event DB backed up per minute) | persistent (Docker volume) |
+| Best for | demos, client testing | 24/7 production |
 
-### 7.1 Create the VM
+(Hugging Face Spaces used to be the free no-card option, but since 2026 Docker
+Spaces require a PRO subscription for new accounts.)
+
+> **Reality check for live cameras:** a cloud engine can only *pull* RTSP from
+> cameras reachable *from the internet* (public IP / DDNS / VPN). Anyone can still
+> test live with the dashboard's **“Use my camera”** source — the browser pushes
+> phone/laptop camera frames to the engine, which works behind any NAT. For
+> cameras on a private site LAN, run this same Docker image on any on-site PC
+> instead — the dashboard works identically, just point `NEXT_PUBLIC_API_URL` at it.
+
+### 7.1 Option A — Modal (free, no card)
+
+[Modal](https://modal.com) runs the engine as a serverless container:
+**$30 of compute credits every month on the free Starter plan, no card**,
+sign-in via GitHub or Google. The engine sleeps when nobody uses it (credits
+don't drain) and wakes on the first request, so the monthly credits cover
+**~150+ hours of actual testing** — and they reset every month.
+`backend/modal_app.py` defines the whole deployment:
+
+1. Sign up at [modal.com](https://modal.com) (GitHub/Google — no card).
+2. One-time login from this machine: **`deploy_modal.bat setup`** (opens a browser).
+3. Deploy: **`deploy_modal.bat`** — the first run builds the image remotely
+   (~10–15 min: torch + tensorflow + baked model weights); code-only updates
+   later deploy in seconds thanks to layer caching.
+4. The engine URL is printed at the end —
+   **`https://<workspace>--visionguard.modal.run`** — open `/api/health` to
+   verify, then use it as `NEXT_PUBLIC_API_URL` (§8).
+
+Behavior to know about:
+
+- **Cold start**: the first request after an idle period takes ~30–60 s while
+  the container boots; after that it's normal speed. It sleeps again 5 min
+  after the last request (`scaledown_window`).
+- **Persistence**: enrolled faces, uploads and the embeddings cache live on a
+  Modal Volume and survive restarts. The SQLite event DB runs on local disk
+  (SQLite is unsafe on network volumes) and is backed up to the Volume every
+  minute — at worst the last minute of events is lost on scale-down.
+- Long MJPEG streams are capped at 1 h per connection (`timeout`); reload the
+  session page to reconnect.
+
+### 7.2 Option B — Oracle Cloud VM
+
+An Ampere A1 VM in Oracle's **Always Free** tier — permanently free, and plenty for
+this workload. All Python dependencies ship aarch64 wheels (this is why the project
+uses EasyOCR instead of PaddleOCR).
+
+#### Create the VM
 
 1. Sign up at [cloud.oracle.com](https://cloud.oracle.com) (card needed for identity
    verification — not charged for Always Free resources).
@@ -291,7 +340,7 @@ instead of PaddleOCR).
 > domain, reduce to 2 OCPU/12 GB, or retry later (early morning works best). Once
 > created, the instance is yours to keep.
 
-### 7.2 Open the firewall — BOTH layers
+#### Open the firewall — BOTH layers
 
 Oracle has a **cloud firewall (Security List)** *and* the **OS firewall (iptables)**.
 Traffic must pass both — forgetting one is the #1 deployment problem.
@@ -312,7 +361,7 @@ sudo iptables -I INPUT -p tcp -m multiport --dports 80,443,8000 -j ACCEPT
 sudo apt install -y iptables-persistent && sudo netfilter-persistent save
 ```
 
-### 7.3 Install Docker and deploy the engine
+#### Install Docker and deploy the engine
 
 ```bash
 # On the VM
@@ -339,9 +388,9 @@ curl http://localhost:8000/api/health          # on the VM
 curl http://<PUBLIC_IP>:8000/api/health        # from your laptop
 ```
 
-Both must return `{"status":"ok"}`. If the second fails, re-check §7.2.
+Both must return `{"status":"ok"}`. If the second fails, re-check the firewall step above.
 
-### 7.4 HTTPS — required before connecting the Vercel frontend
+#### HTTPS — required before connecting the Vercel frontend
 
 Browsers **block** an `https://` page (your Vercel dashboard) from calling a plain
 `http://` API ("mixed content"). Give the engine a domain + TLS certificate — free:
@@ -438,6 +487,9 @@ Tunnel traffic is HTTPS, so no mixed-content problem, and the backend's default
 ---
 
 ## 9. Updating a deployed system
+
+**Backend** (Modal): re-run `deploy_modal.bat` — code-only changes deploy in seconds
+(the image layers are cached; only dependency changes trigger a rebuild).
 
 **Backend** (on the VM):
 

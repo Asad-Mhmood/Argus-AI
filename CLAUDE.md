@@ -52,7 +52,11 @@ then runs a daemon thread that:
 
 **Video sources** (`app/core/video_source.py`): `RTSPSource` runs a grab thread keeping only
 the newest frame (so slow inference never lags a live stream); `FileSource` skips frames to
-match the analysis rate. Both downscale to `MAX_FRAME_WIDTH`. File names are traversal-guarded.
+match the analysis rate; `BrowserSource` (source_type `browser`) holds frames pushed by the
+viewer's browser via `POST /api/sessions/{id}/frames` (JPEG body) and ends the session after
+`BROWSER_FRAME_TIMEOUT_S` without a frame — this is the "Use my camera" dashboard source that
+lets anyone test live from a phone/laptop behind NAT. All downscale to `MAX_FRAME_WIDTH`.
+File names are traversal-guarded.
 
 **Detection modules** (`app/modules/`): one file per use case, registered in
 `app/modules/__init__.py` (`_REGISTRY`), all implementing `BaseModule`
@@ -85,8 +89,9 @@ Module-specific semantics worth knowing:
 - **ppe** deduplicates events with a cooldown window (`VIOLATION_COOLDOWN_S`) so the
   log isn't flooded.
 
-**Frontend**: five pages — `app/page.jsx` (use-case → source wizard; sources are upload + RTSP,
-the demo tab was removed), `app/session/[id]/page.jsx` (live MJPEG + per-use-case stats panels,
+**Frontend**: five pages — `app/page.jsx` (use-case → source wizard; sources are upload +
+browser camera + RTSP, the demo tab was removed; browser-camera sessions stream frames from
+the session page's `CameraSender`), `app/session/[id]/page.jsx` (live MJPEG + per-use-case stats panels,
 polling every ~2.5s), `app/faces/page.jsx` (person enrollment), `app/attendance/page.jsx`
 (cross-session attendance dashboard), `app/history/page.jsx` (filters + custom SVG stacked-bar
 chart + event table). Use-case colors are fixed slots in `app/globals.css` / `lib/api.js` —
@@ -104,6 +109,14 @@ Current live setup (July 2026):
   `NEXT_PUBLIC_API_URL` (baked at build time). Manual deploy fallback:
   `cd frontend && vercel deploy --prod` (the CLI is linked; never deploy from repo root —
   CLI 55's service detection generates a broken vercel.json there).
+- **Backend free cloud option** → Modal serverless container ($30/mo free credits, no card;
+  HF Spaces is NOT an option — Docker Spaces went PRO-only for new accounts in 2026).
+  Defined in `backend/modal_app.py`; deploy with `deploy_modal.bat` from the repo root
+  (`modal` is installed in `backend/.venv`; one-time `deploy_modal.bat setup` to log in).
+  Engine URL: `https://<workspace>--visionguard.modal.run`. Scales to zero when idle
+  (~30–60 s cold start); faces/uploads/embeddings persist on a Volume, the SQLite DB is
+  local-disk with a per-minute Volume backup. `max_containers=1` is load-bearing —
+  sessions are in-memory. README §7.1.
 - **Backend for demos** → this machine via `start_demo.bat` (venv engine + Cloudflare quick
   tunnel). The tunnel prints a fresh `https://*.trycloudflare.com` URL each start; paste it
   into the dashboard's ⚙ Engine override.

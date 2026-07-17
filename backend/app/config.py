@@ -33,6 +33,7 @@ JPEG_QUALITY = int(os.getenv("JPEG_QUALITY", "80"))
 MAX_FRAME_WIDTH = int(os.getenv("MAX_FRAME_WIDTH", "960"))    # downscale before inference
 MAX_CONCURRENT_SESSIONS = int(os.getenv("MAX_CONCURRENT_SESSIONS", "2"))
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
+BROWSER_FRAME_TIMEOUT_S = float(os.getenv("BROWSER_FRAME_TIMEOUT_S", "30"))  # browser-camera session ends after this long without a pushed frame
 
 # --- Module tuning ---
 FACE_THRESHOLD = float(os.getenv("FACE_THRESHOLD", "0.4"))            # cosine distance

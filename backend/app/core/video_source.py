@@ -112,6 +112,46 @@ class FileSource(VideoSource):
         self._cap.release()
 
 
+class BrowserSource(VideoSource):
+    """Frames pushed by the viewer's browser (getUserMedia) via
+    POST /api/sessions/{id}/frames — lets anyone test with their laptop/phone
+    camera, no RTSP setup or reachable-from-the-engine network required."""
+
+    is_live = True
+
+    def __init__(self):
+        self._latest: Optional[np.ndarray] = None
+        self._lock = threading.Lock()
+        self._stopped = False
+        # grace clock starts on the first read() — i.e. after the module's model
+        # has loaded — giving the browser BROWSER_FRAME_TIMEOUT_S to deliver its
+        # first frame (page navigation + camera permission)
+        self._last_push: Optional[float] = None
+
+    def push(self, frame: np.ndarray) -> None:
+        with self._lock:
+            self._latest = frame
+            self._last_push = time.time()
+
+    def read(self) -> Optional[np.ndarray]:
+        with self._lock:
+            if self._last_push is None:
+                self._last_push = time.time()
+        while not self._stopped:
+            with self._lock:
+                if self._latest is not None:
+                    frame, self._latest = self._latest, None
+                    return _downscale(frame)
+                idle = time.time() - self._last_push
+            if idle > config.BROWSER_FRAME_TIMEOUT_S:
+                return None  # tab closed / connection lost
+            time.sleep(0.02)
+        return None
+
+    def release(self) -> None:
+        self._stopped = True
+
+
 def _safe_path(base: Path, name: str) -> Path:
     """Resolve name inside base, refusing path traversal."""
     p = (base / name).resolve()
@@ -127,6 +167,8 @@ def create_source(source_type: str, source: str) -> VideoSource:
         if not source.lower().startswith(("rtsp://", "http://", "https://")):
             raise ValueError("Live source must be an rtsp:// or http(s):// URL")
         return RTSPSource(source)
+    if source_type == "browser":
+        return BrowserSource()
     if source_type == "upload":
         return FileSource(str(_safe_path(config.UPLOADS_DIR, source)))
     if source_type == "demo":

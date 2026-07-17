@@ -18,6 +18,7 @@ export default function StartAnalysis({ useCase }) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState(null);
   const [zones, setZones] = useState([]);
+  const [cameraReady, setCameraReady] = useState(false);
   const fileInput = useRef(null);
 
   useEffect(() => {
@@ -43,7 +44,10 @@ export default function StartAnalysis({ useCase }) {
     }
   }
 
-  const source = sourceTab === "rtsp" ? rtspUrl.trim() : selectedFile;
+  const source =
+    sourceTab === "rtsp" ? rtspUrl.trim() :
+    sourceTab === "camera" ? (cameraReady ? "browser-camera" : null) :
+    selectedFile;
   const canStart = source && !starting;
 
   async function startSession() {
@@ -55,7 +59,7 @@ export default function StartAnalysis({ useCase }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           use_case: useCase,
-          source_type: sourceTab,
+          source_type: sourceTab === "camera" ? "browser" : sourceTab,
           source,
           ...(useCase === "anpr" && zones.length > 0 ? { zones } : {}),
         }),
@@ -75,6 +79,7 @@ export default function StartAnalysis({ useCase }) {
       <div className="tabs">
         {[
           ["upload", "Upload recording"],
+          ["camera", "Use my camera"],
           ["rtsp", "Live IP camera"],
         ].map(([key, label]) => (
           <button
@@ -104,6 +109,10 @@ export default function StartAnalysis({ useCase }) {
         </div>
       )}
 
+      {sourceTab === "camera" && (
+        <CameraPreview onReady={setCameraReady} />
+      )}
+
       {sourceTab === "upload" && (
         <div>
           <div className="row" style={{ marginBottom: 12 }}>
@@ -127,7 +136,7 @@ export default function StartAnalysis({ useCase }) {
         </div>
       )}
 
-      {useCase === "anpr" && source && (
+      {useCase === "anpr" && source && sourceTab !== "camera" && (
         <ZoneEditor
           sourceType={sourceTab}
           source={source}
@@ -140,7 +149,11 @@ export default function StartAnalysis({ useCase }) {
         <button type="button" className="btn primary" disabled={!canStart} onClick={startSession}>
           {starting ? "Starting…" : "▶ Start analysis"}
         </button>
-        {!source && <span className="muted">Select a video source first.</span>}
+        {!source && (
+          <span className="muted">
+            {sourceTab === "camera" ? "Waiting for camera access…" : "Select a video source first."}
+          </span>
+        )}
         {useCase === "anpr" && source && (
           <span className="muted">
             {zones.length > 0
@@ -149,6 +162,61 @@ export default function StartAnalysis({ useCase }) {
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Live preview of the visitor's own camera so they can confirm it works before
+ * starting. The session page re-opens the camera and streams frames to the engine.
+ */
+function CameraPreview({ onReady }) {
+  const videoRef = useRef(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let stream = null;
+    let cancelled = false;
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: false })
+      .then((s) => {
+        if (cancelled) {
+          s.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        stream = s;
+        if (videoRef.current) videoRef.current.srcObject = s;
+        onReady(true);
+      })
+      .catch((err) => {
+        setError(
+          err.name === "NotAllowedError"
+            ? "Camera access was denied — allow it in your browser and reload."
+            : `Camera unavailable: ${err.message}`
+        );
+        onReady(false);
+      });
+    return () => {
+      cancelled = true;
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      onReady(false);
+    };
+  }, [onReady]);
+
+  if (error) return <p className="error-text">{error}</p>;
+  return (
+    <div>
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        style={{ maxWidth: 360, width: "100%", borderRadius: 8, transform: "scaleX(-1)" }}
+      />
+      <p className="muted" style={{ marginTop: 6 }}>
+        Your camera streams to the engine only while the session page is open.
+        On a phone you can switch to the back camera after starting.
+      </p>
     </div>
   );
 }

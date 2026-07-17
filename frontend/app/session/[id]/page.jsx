@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -44,7 +44,9 @@ export default function SessionPage() {
         <StatusBadge status={session.status} />
       </div>
       <p className="page-sub">
-        {session.source_type === "rtsp" ? "Live camera" : session.source_type === "upload" ? "Uploaded video" : "Demo video"}
+        {session.source_type === "rtsp" ? "Live camera"
+          : session.source_type === "browser" ? "Browser camera"
+          : session.source_type === "upload" ? "Uploaded video" : "Demo video"}
         {" · started "}{fmtDateTime(session.started_at || session.created_at)}
         {session.frames_processed != null && <> · {session.frames_processed} frames analysed</>}
       </p>
@@ -60,8 +62,13 @@ export default function SessionPage() {
               alt="Annotated video feed"
             />
           ) : (
-            <div className="card empty">No frames available for this session.</div>
+            <div className="card empty">
+              {live && session.source_type === "browser"
+                ? "Waiting for your camera…"
+                : "No frames available for this session."}
+            </div>
           )}
+          {live && session.source_type === "browser" && <CameraSender sessionId={id} />}
           <div className="row mt">
             {live && (
               <button
@@ -87,6 +94,111 @@ export default function SessionPage() {
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Streams the viewer's camera to the engine at ~2 fps (JPEG frames over HTTP)
+ * for sessions created with source_type "browser". The annotated result comes
+ * back through the normal MJPEG stream above.
+ */
+function CameraSender({ sessionId }) {
+  const videoRef = useRef(null);
+  const [facing, setFacing] = useState("user");
+  const [error, setError] = useState(null);
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    let stream = null;
+    let timer = null;
+    let stopped = false;
+    const canvas = document.createElement("canvas");
+
+    async function start() {
+      setError(null);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: facing, width: { ideal: 1280 } },
+          audio: false,
+        });
+      } catch (err) {
+        setError(
+          err.name === "NotAllowedError"
+            ? "Camera access was denied — allow it in your browser and reload."
+            : `Camera unavailable: ${err.message}`
+        );
+        return;
+      }
+      if (stopped) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      const video = videoRef.current;
+      video.srcObject = stream;
+      try { await video.play(); } catch {}
+      setActive(true);
+      timer = setInterval(() => {
+        if (stopped || !video.videoWidth) return;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext("2d").drawImage(video, 0, 0);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob || stopped) return;
+            fetch(`${apiUrl()}/api/sessions/${sessionId}/frames`, {
+              method: "POST",
+              body: blob,
+            }).catch(() => {});
+          },
+          "image/jpeg",
+          0.8
+        );
+      }, 500);
+    }
+
+    start();
+    return () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      setActive(false);
+    };
+  }, [sessionId, facing]);
+
+  return (
+    <div className="card mt" style={{ padding: 12 }}>
+      <div className="row" style={{ alignItems: "center" }}>
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          style={{
+            width: 120,
+            borderRadius: 6,
+            transform: facing === "user" ? "scaleX(-1)" : "none",
+          }}
+        />
+        <div>
+          {error ? (
+            <p className="error-text">{error}</p>
+          ) : (
+            <p className="muted" style={{ marginBottom: 6 }}>
+              {active ? "● Sending your camera to the engine" : "Starting camera…"}
+              <br />
+              Keep this page open — closing it ends the stream.
+            </p>
+          )}
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => setFacing((f) => (f === "user" ? "environment" : "user"))}
+          >
+            ⟲ Flip camera
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

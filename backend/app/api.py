@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -33,8 +33,8 @@ class Zone(BaseModel):
 
 class SessionRequest(BaseModel):
     use_case: str
-    source_type: str  # rtsp | upload | demo
-    source: str       # RTSP URL, uploaded file name, or demo file name
+    source_type: str  # rtsp | upload | demo | browser
+    source: str       # RTSP URL, uploaded/demo file name, or a label for browser sources
     zones: Optional[list[Zone]] = None  # restrict detection to these areas
 
 
@@ -169,6 +169,30 @@ def stop_session(session_id: str) -> dict:
     if not manager.stop(session_id):
         raise HTTPException(404, "Session not found or already finished")
     return {"stopped": True}
+
+
+@router.post("/sessions/{session_id}/frames")
+async def push_frame(session_id: str, request: Request) -> dict:
+    """Ingest one camera frame (JPEG body) pushed by the viewer's browser.
+    Only sessions created with source_type "browser" accept frames."""
+    from .core.video_source import BrowserSource
+
+    session = manager.get(session_id)
+    if session is None or not session.is_active:
+        raise HTTPException(404, "Session not found or already finished")
+    if not isinstance(session.video, BrowserSource):
+        raise HTTPException(400, "This session does not accept pushed frames")
+    data = await request.body()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(413, "Frame too large (max 5 MB)")
+    import cv2
+    import numpy as np
+
+    frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(400, "Body must be a JPEG or PNG image")
+    session.video.push(frame)
+    return {"ok": True}
 
 
 @router.get("/sessions/{session_id}/stream")

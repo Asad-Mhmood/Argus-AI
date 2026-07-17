@@ -11,7 +11,7 @@ import cv2
 
 from .. import config, database
 from ..modules import create_module
-from .video_source import VideoSource, create_source
+from .video_source import BrowserSource, VideoSource, create_source
 
 log = logging.getLogger("visionguard.session")
 
@@ -59,7 +59,11 @@ class AnalysisSession:
                 if frame is None:
                     self.status = "completed" if not self.video.is_live else "error"
                     if self.status == "error":
-                        self.error = "Live stream dropped or produced no frames"
+                        self.error = (
+                            "Camera stream ended — the sender page was closed or lost connection"
+                            if self.source_type == "browser"
+                            else "Live stream dropped or produced no frames"
+                        )
                     break
                 annotated, events = self.module.process_frame(frame, t0)
                 if events:
@@ -101,6 +105,10 @@ class AnalysisSession:
 
     def stop(self) -> None:
         self._stop.set()
+        # a BrowserSource read() blocks waiting for the next pushed frame (up to
+        # BROWSER_FRAME_TIMEOUT_S) — release it (flag-only) so stop is immediate
+        if isinstance(self.video, BrowserSource):
+            self.video.release()
         self._thread.join(timeout=5)
 
     @property
