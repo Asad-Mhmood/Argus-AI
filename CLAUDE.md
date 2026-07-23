@@ -69,8 +69,8 @@ Module-specific semantics worth knowing:
   via `PPE_NEUTRAL_CLASSES` and excluded from the compliance rate.
 - **face_attendance**: embeddings cache in `backend/data/face_embeddings.json`, built from
   `backend/faces_db/<person>/*.jpg`; rebuild via `POST /api/faces/rebuild` (enroll/delete
-  auto-rebuild, degrading gracefully when deepface is missing). Unrecognized faces emit
-  `unknown_face` events deduped by `UNKNOWN_FACE_COOLDOWN_S`. Cross-session dashboard data
+  auto-rebuild, degrading gracefully when deepface is missing). Unrecognized faces are
+  ignored entirely — no box drawn, no event logged. Cross-session dashboard data
   comes from `GET /api/attendance` (person + date filters); frontend pages: `/faces`
   (enrollment) and `/attendance` (dashboard).
 - **anpr**: logs **one event per vehicle visit**, not per read. Detections are grouped

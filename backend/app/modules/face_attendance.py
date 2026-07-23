@@ -3,8 +3,8 @@
 Enrollment: each subfolder of FACES_DIR is one person, holding one or more photos.
 Embeddings are averaged per person and cached to JSON. A person is 'checked in'
 the first time they are recognized, and re-logged if they reappear after
-ATTENDANCE_GAP_MIN minutes away. Faces matching nobody are labeled "Unknown"
-and logged as 'unknown_face' events, deduped by UNKNOWN_FACE_COOLDOWN_S.
+ATTENDANCE_GAP_MIN minutes away. Faces matching nobody are ignored entirely —
+no box, no event, no attendance record.
 """
 import json
 import logging
@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from .. import config
-from .base import BaseModule, COLOR_ALERT, COLOR_OK, draw_box
+from .base import BaseModule, COLOR_OK, draw_box
 
 log = logging.getLogger("visionguard.face")
 
@@ -114,8 +114,6 @@ class FaceAttendanceModule(BaseModule):
         }
         # name -> {"first_seen": ts, "last_seen": ts, "sightings": int}
         self.people: dict[str, dict] = {}
-        self.unknown_detections = 0
-        self._last_unknown_ts = 0.0
 
     def _recognize(self, face_crop: np.ndarray) -> tuple[str, float]:
         try:
@@ -147,16 +145,10 @@ class FaceAttendanceModule(BaseModule):
             if face.shape[0] < 40 or face.shape[1] < 40:
                 continue
             name, dist = self._recognize(face)
-            known = name != "Unknown"
-            confidence = round(1 - dist, 3) if known else None
-            draw_box(frame, (x1, y1, x2, y2), name, COLOR_OK if known else COLOR_ALERT)
-            if not known:
-                if ts - self._last_unknown_ts >= config.UNKNOWN_FACE_COOLDOWN_S:
-                    self._last_unknown_ts = ts
-                    self.unknown_detections += 1
-                    events.append({"type": "unknown_face", "label": "Unknown",
-                                   "confidence": None, "ts": ts})
+            if name == "Unknown":
                 continue
+            confidence = round(1 - dist, 3)
+            draw_box(frame, (x1, y1, x2, y2), name, COLOR_OK)
             record = self.people.get(name)
             gap = config.ATTENDANCE_GAP_MIN * 60
             if record is None or ts - record["last_seen"] > gap:
@@ -174,7 +166,6 @@ class FaceAttendanceModule(BaseModule):
         now = time.time()
         return {
             "enrolled": len(self.known),
-            "unknown_detections": self.unknown_detections,
             "people": [
                 {
                     "name": name,
